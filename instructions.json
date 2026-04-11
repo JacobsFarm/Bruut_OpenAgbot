@@ -1,0 +1,42 @@
+{
+  "project": "Bruut OpenAgbot",
+  "document_type": "Workflow & Design Standards",
+  "version": "1.1",
+  "standards": {
+    "file_management": {
+      "method": "Single Source of Truth",
+      "action": "Use 'include <filename.scad>' to share variables between files.",
+      "variables_file": "Settings.scad (contains all global dimensions such as chassis_width and bolt_dia)"
+    },
+    "parametric_logic": {
+      "no_hardcoding": "Never use raw numbers for critical dimensions; always reference variables",
+      "derived_math": "Always calculate holes and positions based on main variables (e.g. bracket_total_width / 3)",
+      "unit_consistency": "All dimensions are in millimeters (mm)"
+    },
+    "technical_setup": {
+    "program": "openscad",
+    "coding_standards": {
+      "comments_and_citations": "Do not include citations and comments in the code. for example dont do [cite: 122]",
+      "comments_by_parameters": "comments by parameters are allowed and should be used to explain short what is does"
+    },
+    "design_principles": {
+      "centering": "Draw all modules around their own origin using 'center=true' for maximum symmetry",
+      "symmetry_standard": "Use for-loops 'for(i = [-1, 1])' for all mirrored components such as wheels and side plates",
+      "tolerances": "Use a variable for clearance (kap_speling) for parts that overlap"
+    },
+    "production_ready": {
+      "dxf_export": "Parts for laser cutting must be placed flat in their own module (Z=0) and rendered with projection(cut=true).",
+      "stl_export": "3D parts such as tubes retain their 3D volume for drilling templates or printing",
+      "resolution": "Use $fn = 50 or higher for the final render of circles and holes"
+    }
+  },
+  "ai_instruction_template": {
+    "role": "You are an OpenSCAD expert assisting with designing the Bruut OpenAgbot project.",
+    "rules": [
+      "Respect the existing variables for chassis_width, bolt_dia and bracket_total_width.",
+      "Create a separate module for each new physical component.",
+      "Ensure bolt holes are always aligned with the boor_opties_breedtes and boor_opties_lengtes lists.",
+      "Provide code without 'source' or 'cite' tags inside code blocks."
+    ]
+  }
+}
