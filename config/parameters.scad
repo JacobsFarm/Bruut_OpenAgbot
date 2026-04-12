@@ -25,17 +25,33 @@ exploded_view = false;
 explosion_dist = 150; 
 
 // Motor & Wheel Data
-tire_dia = 400;
+tire_dia = 430;
 tire_width = 100;
 hub_dia = 160;
-hub_width = 155;
-axle_dia = 16;
-bolt_dia = 12;
+hub_width = 140; //specs from Quinder are: Fork width for mounting: 138mm
+axle_dia = 10.2; //specs from Quinder are: Mounting hole: max 10.2mm
+bolt_dia = 14.2;
 
 // Bracket Geometry
 bracket_thick = 10;
 side_plate_top_width = tire_width * 2.6;
-arm_height = (tire_dia/2) + 30;
-inner_width = hub_width + 10;
+side_plate_bottom_width = 80;
+axle_bottom_dist = 35;
+
+
+arm_height = (tire_dia / 2) + 30;
+inner_width = hub_width;
 bracket_total_width = inner_width + (2 * bracket_thick);
 bracket_top_z = arm_height + bracket_thick;
+
+// Axle bracket
+axle_hex_width = 80;          
+axle_hex_height = 40;
+axle_hex_straight_part = 25;   
+axle_bracket_thickness = 8;    
+
+axle_hole_diameter = 8.2;
+axle_hole_distance = 30;
+
+axle_flat_width = axle_dia; // Gebruikt 10.2 uit parameters 
+axle_round_dia = bolt_dia;  // Gebruikt 14.2 uit parameters
