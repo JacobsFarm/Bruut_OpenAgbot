@@ -3,8 +3,9 @@
 // ==========================================
 tpl_width = 80;        // Wider than the hole spacing (axle_hole_distance is 30)
 tpl_height = 55;       // Tall enough to cover the axle slot and holes
-tpl_thickness = 4;     // Thickness of the 3D-printed template
-tpl_clearance = 0.0;   // Extra tolerance so drill/bolt does not bind in plastic
+tpl_thickness = 5;     // Thickness of the 3D-printed template
+tpl_clearance = 0.3;   // Extra tolerance so drill/bolt does not bind in plastic
+bottom_slot = 10;      // 10 for an open bottom or 8 or lower for an closed bottom
 
 // DEBUG MODE - Set to 'false' before exporting STL
 show_reference = true; 
@@ -35,7 +36,7 @@ module drill_template() {
                 cylinder(d = axle_dia + tpl_clearance, h = 50, center = true, $fn = 64);
             
             translate([axle_bottom_dist / 2, 0, 0])
-                cube([axle_bottom_dist + 8, axle_dia + tpl_clearance, 50], center = true);
+                cube([axle_bottom_dist + bottom_slot, axle_dia + tpl_clearance, 50], center = true);
 
             translate([0, axle_hole_distance, 0])
                 cylinder(d = axle_hole_diameter + tpl_clearance, h = 50, center = true, $fn = 64);
