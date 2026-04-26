@@ -1,0 +1,76 @@
+# ==========================================
+# Stack: Node / SvelteKit / Python
+# ==========================================
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+
+# --- Frontend (SvelteKit / Vite / Node) ---
+node_modules/
+frontend/node_modules/
+.svelte-kit/
+frontend/.svelte-kit/
+/build/
+/dist/
+/package/
+.vercel
+.netlify
+
+# --- Python / Flask ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Environment & Secrets (Critical!) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Testing & Coverage ---
+/test-results/
+.nyc_output
+.cypress
+coverage/
+.pytest_cache/
+
+# --- Local Data, Weights & Media ---
+# Negeer alle inhoud van de data folder 
+data/**/*
+!.gitkeep
+!data/config.example.json 
+
+# Negeer alle inhoud van de weights folder
+weights/**/*
+# Behalve het notes.txt bestand
+!weights/notes.txt
+
+# Algemene AI/Machine Learning bestandstypen
+*.h5
+*.pth
+*.pt
+*.onnx
+*.ckpt
+
+# Video's en overige media 
+test/test_video.mp4 
+*.mp4 
+*.mov 
+
+# --- IDE Settings (Optional but Recommended) --- 
+.vscode/* 
+!.vscode/extensions.json 
+.idea/ 
+*.sublime-project 
+*.sublime-workspace

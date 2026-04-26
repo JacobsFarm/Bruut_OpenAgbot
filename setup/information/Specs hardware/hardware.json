@@ -1,0 +1,14 @@
+Onderdelen
+
+Core
+Jetson orin nano 16gb dev kit as the computer
+Hubmotors quinder 550 watt met bijbehorende controllers
+Arduino uno r4 wifi
+DAC module MCP4728
+IMU 80056
+Ardupilot on a ...
+
+RTK gedeelte
+simpleRTK2B Pro and Antenna with zed-F9 module
+Own rtkbase 
+RTK corrections via NTRIP

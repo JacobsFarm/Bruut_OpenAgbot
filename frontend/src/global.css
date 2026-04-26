@@ -1,0 +1,143 @@
+/* =========================================
+   BASIS & LAYOUT
+   ========================================= */
+:root {
+    --bg-color: #121212;
+    --card-bg: #1e1e1e;
+    --text-main: #ffffff;
+    --text-muted: #aaaaaa;
+    --accent-green: #2ecc71;
+    --accent-orange: #e67e22;
+    --border-radius: 16px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    overscroll-behavior-y: none;
+    overflow-x: hidden;
+}
+
+.app-wrapper { 
+    max-width: 1200px; 
+    margin: 0 auto; 
+    padding: 10px; 
+}
+
+/* Tab gedrag voor Svelte (Svelte regelt display:block al via {#if}) */
+.tab-content { 
+    animation: fadeIn 0.25s ease-out; 
+}
+
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(10px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+.grid-container { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 15px; 
+}
+
+@media (min-width: 768px) {
+    .grid-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas: "weight plan" "actions actions";
+    }
+}
+
+/* =========================================
+   COMPOMENTEN & NAVIGATIE
+   ========================================= */
+.tab-navigation {
+    display: flex;
+    justify-content: space-around;
+    background: var(--card-bg);
+    padding: 8px;
+    border-radius: var(--border-radius);
+    margin-bottom: 20px;
+    border: 1px solid #333;
+}
+
+.tab-link {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 12px 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.2s ease;
+}
+
+.tab-link span { font-size: 1.8rem; }
+.tab-link.active { background-color: #333; color: var(--accent-green); }
+.tab-link.active span { filter: drop-shadow(0 0 8px rgba(46, 204, 113, 0.4)); }
+
+.card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    border: 1px solid #333;
+}
+
+.card-header {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 1px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.actions-container { display: flex; gap: 10px; grid-area: actions; }
+.action-btn { border: none; border-radius: 12px; padding: 18px; font-size: 1.2rem; font-weight: bold; color: white; cursor: pointer; }
+.action-btn:active { transform: scale(0.95); }
+.action-btn.secondary { background: #444; flex: 1; }
+.action-btn.primary { background: var(--accent-green); flex: 2; }
+
+/* =========================================
+   DASHBOARD & WEERGAVE (Tabs 1 & 2)
+   ========================================= */
+.weight-display { padding: 20px 0; text-align: center; }
+.weight-value { font-size: 5rem; font-weight: 800; line-height: 1; }
+.weight-unit { font-size: 1.5rem; color: var(--text-muted); }
+.weight-sub { color: var(--accent-green); margin-top: 10px; font-size: 0.9rem; text-align: center;}
+
+.step-badge { background: #333; padding: 4px 8px; border-radius: 6px; color: white; }
+.progress-section { background: #111; padding: 15px; border-radius: 12px; }
+.progress-track { background: #333; height: 24px; border-radius: 12px; overflow: hidden; margin-top: 10px; }
+.progress-fill { background: linear-gradient(90deg, var(--accent-orange), #d35400); height: 100%; transition: width 0.5s ease-in-out; }
+
+.display-container { height: 70vh; display: flex; align-items: center; }
+.number-card-clean { background: var(--card-bg); width: 100%; height: 100%; border-radius: var(--border-radius); border: 3px solid var(--accent-green); display: flex; flex-direction: column; justify-content: center; align-items: center; box-shadow: inset 0 0 30px rgba(46, 204, 113, 0.05); }
+.clean-number { font-size: 35vw; font-weight: 800; font-family: 'Courier New', monospace; color: var(--accent-green); line-height: 0.8; }
+.clean-unit { font-size: 3rem; color: var(--text-muted); margin-top: 10px; }
+
+/* =========================================
+   CAMERA & SETTINGS (Tabs 3 & 4)
+   ========================================= */
+.video-wrapper { width: 100%; background: #000; aspect-ratio: 16/9; border-radius: 12px; overflow: hidden; border: 1px solid #333; display: flex; align-items: center; justify-content: center; }
+.video-wrapper canvas, .video-wrapper img { width: 100%; height: 100%; object-fit: contain; }
+.status-text { color: var(--accent-green); font-size: 0.9rem; animation: pulse 2s infinite; text-align: center; }
+@keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+.settings-grid { display: flex; flex-direction: column; gap: 10px; }
+.settings-card { display: flex; align-items: center; gap: 15px; padding: 20px !important; cursor: pointer; }
+.settings-card:active { transform: scale(0.98); background: #2a2a2a; }
+.settings-icon { font-size: 1.8rem; background: #333; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
+
+/* Desktop correctie */
+@media (min-width: 768px) {
+    .clean-number { font-size: 12rem; }
+    .tab-link span { font-size: 1.4rem; }
+}
