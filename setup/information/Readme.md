@@ -61,3 +61,10 @@ Dit is de verbinding die de analoge spanning (0.77V - 3.4V) naar de motoren stuu
     GND ➔ Witte GND-draad van BEIDE wielen
 
 Gebruik maken van de UBX informatie ipv de NEMEA berichten 
+
+IMU BNO086
+
+IMU 3V3 ➔ 3.3V Power      ➔ pin 1 on the JETSON 
+IMU SDA ➔ I2C SDA (Data)  ➔ pin 3 on the JETSON
+IMU SCL ➔ I2C SCL (Clock) ➔ pin 5 on the JETSON
+IMU GND ➔ Ground          ➔ pin 6 on the JETSON

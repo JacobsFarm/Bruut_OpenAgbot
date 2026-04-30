@@ -1,21 +1,20 @@
 <script>
-    let modus = "HANDMATIG"; // of "AUTONOOM"
+    let modus = "HANDMATIG";
     
-    // Functie om de robot te vertellen in welke modus hij zit
     async function wisselModus(nieuweModus) {
         modus = nieuweModus;
-        await fetch('/api/set_modus', {
-            method: 'POST',
-            body: JSON.stringify({ modus: modus })
-        });
+        
+        if (modus === "AUTONOOM") {
+            await fetch('/api/start_nav', { method: 'POST' });
+        } else {
+            await fetch('/api/stop_nav', { method: 'POST' });
+        }
     }
 
-    // Als je handmatig stuurt (bijv. pijltjestoetsen), breek dan automatisch uit de RTK modus
-    function noodIngreep() {
+    async function noodIngreep() {
         if (modus === "AUTONOOM") {
-            wisselModus("HANDMATIG");
-            // Stuur direct stop-commando naar motor
-            fetch('/api/stop', { method: 'POST' });
+            modus = "HANDMATIG";
+            await fetch('/api/stop', { method: 'POST' });
         }
     }
 </script>
@@ -39,14 +38,13 @@
 
         {#if modus === "AUTONOOM"}
             <div class="rtk-status">
-                <p>Navigeren naar Waypoint 3/10...</p>
-                <p>Afstand: 4.2 meter</p>
+                <p>Navigeren naar Waypoints...</p>
                 <button class="noodstop" on:click={noodIngreep}>🚨 NEEM BESTURING OVER</button>
             </div>
         {:else}
             <div class="manual-status">
                 <p>Klaar voor toetsenbord/muis invoer.</p>
-                </div>
+            </div>
         {/if}
     </div>
 </div>

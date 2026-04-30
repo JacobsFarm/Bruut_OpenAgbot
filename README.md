@@ -21,6 +21,10 @@ The concept branch contains all the Openscad 3d model designs
 <img width="528" height="402" alt="Schermafbeelding 2026-01-11 211223" src="https://github.com/user-attachments/assets/06ccb895-c5d7-4b86-9f02-24e3c4b4d2fb" />
 <img width="499" height="417" alt="Schermafbeelding 2026-01-11 210804" src="https://github.com/user-attachments/assets/07f828e7-3dbd-44e4-86c0-0ea0aff3f330" />
 
+## Options 
+making taskcards of the detection of diseases / birdnests or Sprayed weed
+<img width="1904" height="628" alt="Schermafbeelding 2026-04-26 231133" src="https://github.com/user-attachments/assets/24dcf64c-6d9d-4f07-83c4-480092d47888" />
+
 ## Sketches
 
 <img width="1792" height="2368" alt="Gemini_Generated_Image_n9f8gzn9f8gzn9f8(1)" src="https://github.com/user-attachments/assets/c2f21cff-1277-495d-9098-2a6845bc5c8c" />

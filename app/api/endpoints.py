@@ -2,21 +2,22 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from app.vision.streamer import VisionStreamer
-from app.hardware import config # Importeer de config die we in hardware/__init__.py laden
+from app.hardware import config
 import json
 import os
 import glob
 
-# Importeer de hardware die we net hebben opgestart
 from app.hardware import motor_controller, gps_system
+from app.services.navigator import Navigator
 
 vision_streamer = VisionStreamer(config)
 vision_streamer.start()
 
+navigator = Navigator(gps_system, motor_controller)
+
 router = APIRouter()
 WAYPOINTS_FILE = 'data/waypoints.json'
 
-# --- Pydantic Modellen voor inkomende data ---
 class MotorCommand(BaseModel):
     links: int
     rechts: int
@@ -25,32 +26,29 @@ class Waypoint(BaseModel):
     lat: float
     lon: float
 
-# ==========================================
-# 1. STATUS ENDPOINTS (GPS & Systeem)
-# ==========================================
+class NavCommand(BaseModel):
+    base_pwm: int
+
+class DirectNavCommand(BaseModel):
+    lat: float
+    lon: float
+    base_pwm: int
+
 @router.get("/status")
 def get_status():
-    """Geeft de actuele GPS status terug aan het dashboard"""
     return gps_system.current_position
 
-# ==========================================
-# 2. MOTOR ENDPOINTS
-# ==========================================
 @router.post("/motor")
 def stuur_motor(cmd: MotorCommand):
-    print(f"💻 [API] Svelte zegt: Links={cmd.links}, Rechts={cmd.rechts}") # <-- VOEG DEZE TOE
     motor_controller.stuur_motoren(cmd.links, cmd.rechts)
     return {"status": "success", "links": cmd.links, "rechts": cmd.rechts}
 
 @router.post("/stop")
 def noodstop():
-    """Zet alle motoren direct stil (DAC waarde 700)"""
+    navigator.stop()
     motor_controller.stop()
     return {"status": "noodstop geactiveerd"}
 
-# ==========================================
-# 3. WAYPOINT ENDPOINTS
-# ==========================================
 def laad_waypoints():
     if os.path.exists(WAYPOINTS_FILE):
         with open(WAYPOINTS_FILE, 'r') as f:
@@ -63,12 +61,10 @@ def bewaar_waypoints(data):
 
 @router.get("/waypoints")
 def get_waypoints():
-    """Haalt de lijst met opgeslagen waypoints op"""
     return laad_waypoints()
 
 @router.post("/waypoints")
 def add_waypoint(wp: Waypoint):
-    """Slaat een nieuw waypoint op (bijvoorbeeld huidige GPS locatie)"""
     waypoints = laad_waypoints()
     waypoints.append({"lat": wp.lat, "lon": wp.lon})
     bewaar_waypoints(waypoints)
@@ -76,16 +72,29 @@ def add_waypoint(wp: Waypoint):
 
 @router.delete("/waypoints")
 def clear_waypoints():
-    """Zil alle waypoints (om een nieuwe route te maken)"""
     bewaar_waypoints([])
     return {"status": "cleared"}
 
-# ==========================================
-# 4. VISION & CAMERA ENDPOINTS
-# ==========================================
+@router.post("/start_nav")
+def start_navigation(cmd: NavCommand):
+    wps = laad_waypoints()
+    if not wps:
+        raise HTTPException(status_code=400, detail="Geen waypoints gevonden")
+    navigator.start(wps, cmd.base_pwm)
+    return {"status": "navigatie gestart"}
+
+@router.post("/start_nav_direct")
+def start_nav_direct(cmd: DirectNavCommand):
+    navigator.start([{"lat": cmd.lat, "lon": cmd.lon}], cmd.base_pwm)
+    return {"status": "navigatie gestart naar specifiek punt"}
+
+@router.post("/stop_nav")
+def stop_navigation():
+    navigator.stop()
+    return {"status": "navigatie gestopt"}
+
 @router.get("/video_feed")
 def video_feed():
-    """Dit endpoint streamt de live YOLO beelden naar de <img> tag in Svelte"""
     return StreamingResponse(
         vision_streamer.get_mjpeg_stream(), 
         media_type="multipart/x-mixed-replace; boundary=frame"
@@ -93,9 +102,7 @@ def video_feed():
 
 @router.get("/weeds")
 def get_weeds():
-    """Scant de nieuwe data/detections mappen en haalt de metadata op"""
     weeds = []
-    # Zoek naar alle metadata.json bestanden in de submappen van data/detections
     metadata_files = glob.glob('data/detections/*/metadata.json')
     
     for file_path in metadata_files:
@@ -105,6 +112,5 @@ def get_weeds():
         except Exception:
             pass
             
-    # Sorteer op tijdstip (nieuwste eerst)
     weeds.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     return weeds
