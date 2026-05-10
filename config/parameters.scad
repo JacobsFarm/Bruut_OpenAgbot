@@ -33,15 +33,15 @@ axle_dia = 10.2; //specs from Quinder are: Mounting hole: max 10.2mm
 bolt_dia = 14.2;
 
 // Bracket Geometry
-bracket_thick = 10;
-side_plate_top_width = tire_width * 2.6;
-side_plate_bottom_width = 80;
+bracket_thick = 6;
+side_plate_top_width = 200;
+side_plate_width = 200;
 axle_bottom_dist = 35;
-
+extra_space_bracket = 30;
 
 arm_height = (tire_dia / 2) + 30;
 inner_width = hub_width;
-bracket_total_width = inner_width + (2 * bracket_thick);
+bracket_total_width = inner_width + (extra_space_bracket*2) + (2 * bracket_thick);
 bracket_top_z = arm_height + bracket_thick;
 
 // Axle bracket
