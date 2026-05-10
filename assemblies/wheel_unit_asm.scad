@@ -46,7 +46,8 @@ module wheel_unit_asm() {
             // 1. De standaard zijplaten van de bracket
             if (show_sides) {
                 translate([i * (inner_width/2 + bracket_thick/2), 0, 0])
-                    bracket_side_plate();
+                rotate([0, 0, (i == 1) ? 180 : 0])
+                    bracket_side_plate(show_bend = true); 
             }
 
             // 2. Axle Brackets (Hexagon plaatjes)
