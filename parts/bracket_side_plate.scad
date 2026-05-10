@@ -1,8 +1,8 @@
 include <../config/parameters.scad>
 
-bracket_side_plate(show_bend = true, bend_angle = 90);
+bracket_side_plate(show_bend = false, bend_angle = 90);
 
-module bracket_side_plate(show_bend = false, bend_angle = 90) {
+module bracket_side_plate(show_bend = true, bend_angle = 90) {
     h_total = arm_height + axle_bottom_dist;
     z_center = (arm_height - axle_bottom_dist) / 2;
     
@@ -17,7 +17,7 @@ module bracket_side_plate(show_bend = false, bend_angle = 90) {
                     // Vlakke middenstuk
                     translate([0, 0, z_center])
                         cube([bracket_thick, y_center_width, h_total], center=true);
-                    
+
                     // Rechter / Bovenste flap (positieve Y-kant)
                     translate([0, y_center_width / 2, z_center])
                         rotate([0, 0, bend_angle])
@@ -31,6 +31,7 @@ module bracket_side_plate(show_bend = false, bend_angle = 90) {
                                 cube([bracket_thick, extra_space_bracket, h_total], center=true);
                 }
             } else {
+                // Weergave als platte plaat (ongebogen)
                 hull() { 
                     translate([0, 0, arm_height]) 
                         cube([bracket_thick, side_plate_width, 0.1], center=true);
@@ -39,6 +40,7 @@ module bracket_side_plate(show_bend = false, bend_angle = 90) {
                 }
             }
 
+            // --- Bestaande Uitsneden (As gaten e.d.) ---
             rotate([0, 90, 0]) {
                 translate([-5, 0, 0]) 
                     cylinder(d = axle_dia, h = bracket_thick + 10, center = true);
@@ -51,6 +53,41 @@ module bracket_side_plate(show_bend = false, bend_angle = 90) {
                     cylinder(d = axle_hole_diameter, h = bracket_thick + 10, center = true);
                 translate([0, -axle_hole_distance, 0])
                     cylinder(d = axle_hole_diameter, h = bracket_thick + 10, center = true);
+            }
+
+            // --- NIEUW: 3 Gaten in de zijflappen ---
+            // Bereken de Z-posities: Top (8cm van boven), Midden (z_center), Bodem (8cm van onder)
+            for (z_pos = [arm_height - side_hole_margin, z_center, -axle_bottom_dist + side_hole_margin]) {
+                
+                if (show_bend) {
+                    // Gaten in de gebogen weergave (volgt de flap rotaties)
+                    
+                    // Rechterkant (positieve Y)
+                    translate([0, y_center_width / 2, 0])
+                        rotate([0, 0, bend_angle])
+                            translate([0, extra_space_bracket / 2, z_pos])
+                                rotate([0, 90, 0])
+                                    cylinder(d = bracket_bolt_diameter, h = bracket_thick + 20, center = true);
+                    
+                    // Linkerkant (negatieve Y)
+                    translate([0, -y_center_width / 2, 0])
+                        rotate([0, 0, -bend_angle])
+                            translate([0, -extra_space_bracket / 2, z_pos])
+                                rotate([0, 90, 0])
+                                    cylinder(d = bracket_bolt_diameter, h = bracket_thick + 20, center = true);
+                } else {
+                    // Gaten in de platte weergave (uitgeklapt op Y-as)
+                    
+                    // Rechterkant plat
+                    translate([0, y_center_width / 2 + extra_space_bracket / 2, z_pos])
+                        rotate([0, 90, 0])
+                            cylinder(d = bracket_bolt_diameter, h = bracket_thick + 20, center = true);
+                    
+                    // Linkerkant plat
+                    translate([0, -(y_center_width / 2 + extra_space_bracket / 2), z_pos])
+                        rotate([0, 90, 0])
+                            cylinder(d = bracket_bolt_diameter, h = bracket_thick + 20, center = true);
+                }
             }
         }
     }
