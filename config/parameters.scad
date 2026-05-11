@@ -41,8 +41,9 @@ side_plate_width = 200;
 
 //Side plate
 axle_bottom_dist = 35;
-extra_space_bracket = 30;
-side_hole_margin = 75;
+extra_space_bracket = 40;
+side_hole_start_from_bottom = 20; 
+side_hole_pitch = 100; 
 
 tab_length = 40;         // Lengte van de nok/sleuf
 tab_offset_y = 40;       // Positie vanaf het midden over de Y-as (uit elkaar)
@@ -61,7 +62,7 @@ bracket_top_z = arm_height + bracket_thick;
 // Axle bracket
 axle_hex_width = 85;          
 axle_hex_height = 40;
-axle_hex_straight_part = 25;   
+axle_hex_straight_part = 30;   
 axle_bracket_thickness = 6;    
 
 axle_hole_diameter = 10.2;
