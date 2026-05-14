@@ -1,0 +1,68 @@
+{
+  "project": "universal_openscad_template_generator",
+  "concept_rationale": {
+    "purpose": "To create a physical interface (drill jig/alignment tool) for an existing digital part.",
+    "logic": "The template acts as a 'negative' or 'stencil' of the reference part's mounting features.",
+    "hardcoding_intent": "Template dimensions (width, height, thickness) are independent of the source part's dimensions to allow for material saving or specific jig-clamping requirements without polluting the source project's logic.",
+    "integrity": "The reference model must remain a 'read-only' visual guide to guarantee that the final 3D printed template matches the real-world hardware perfectly.",
+    "alignment_register": "Use an L-shaped base (lip/register) that hooks onto the physical part for perfect, reproducible alignment."
+  },
+  
+  "instruction_mode": "hardcoded_local_parameters",
+
+  "code_style_constraints": {
+    "comments_rule": "NO comments or citations allowed inside the code body. Comments are ONLY permitted at the top of the parameters section."
+  },
+
+  "workflow_logic": {
+    "parameter_separation": "All template-specific sizing must be HARDCODED as local variables at the top. Do NOT import these from parameters.scad.",
+    "linking": {
+      "include": "Used for shared constants (hole spacing, diameters) to ensure 1:1 synchronization.",
+      "use": "Used for reference geometry to prevent unwanted ghost-objects in the final STL."
+    }
+  },
+
+  "core_structure": {
+    "header": [
+      "// LOCAL TEMPLATE CONFIG (Hardcoded)",
+      "for example:"
+      "tpl_width = 100;",
+      "tpl_height = 80;",
+      "tpl_thickness = 5;",
+      "tpl_clearance = 0.2; // Extra room for drill bit/bolt fit",
+      "",
+      "// EXTERNAL DATA (Linked)",
+      "include <parameters.scad>;",
+      "use <reference_model.scad>;"
+    ],
+    "debug_mode": "Include a 'show_reference = true;' toggle for alignment verification."
+  },
+
+  "geometry_logic": {
+    "base": "The 'substrate' or plate of the template, driven by tpl_ variables. Combine with an alignment lip (using union) based on original part dimensions.",
+    "subtraction": {
+      "method": "difference()",
+      "epsilon_offset": "Add 0.01mm (z-diff) to subtraction cylinders to ensure clean manifold cuts.",
+      "feature_mapping": "Subtract holes/slots using positions defined in parameters.scad, but applying local tpl_clearance.",
+      "extended_reach": "Make subtraction cylinders extra long (e.g., h=50) to guarantee they cut entirely through the template even when offset."
+    }
+  },
+
+  "ai_system_tips": {
+    "naming_convention": "Prefix all local variables with 'tpl_' to distinguish them from project parameters.",
+    "z_fighting_fix": "Always use 'translate([0, 0, -1]) cylinder(h = tpl_thickness + 2, ...)' for holes.",
+    "origin_alignment": "Ask the user if the reference model is centered (center=true) before calculating hole offsets.",
+    "flush_mounting": "Translate the template by half the reference part thickness plus half the template thickness to place it perfectly flush against the surface."
+  },
+
+  "export_protocol": [
+    "1. Set 'show_reference = false;'",
+    "2. Increase resolution: '$fn = 64;'",
+    "3. Render (F6) and Export STL."
+  ],
+
+  "common_pitfalls": {
+    "parameter_drift": "Avoid redefining hole distances locally; always pull from the include file.",
+    "fitment_issues": "Ensure tpl_clearance is added to the diameter, otherwise the drill bit will bind."
+  }
+}

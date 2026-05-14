@@ -1,0 +1,36 @@
+{
+  "system": {
+    "os": "windows"
+  },
+  "hardware": {
+    "gps_port": "/dev/ttyACM1", // COM2 for windows
+    "gps_heading_port": "/dev/ttyACM0", // COM3 for windows
+    "gps_baudrate": 115200, 
+    "arduino_port": "/dev/ttyACM2", // COM4 for windows
+    "arduino_baudrate": 115200
+  },
+  "ntrip": {
+    "host": "caster.centipede.fr",
+    "port": 2101,
+    "mountpoint": "NEAR",
+    "user": "centipede",
+    "pass": "centipede"
+  },
+  "vision": {
+    "camera_type": "usb",
+    "usb_camera": {
+      "index": 0, 
+      "width": 800,
+      "height": 600,
+      "fps": 100
+    },
+    "rtsp_streams": [
+      "rtsp://url"
+    ],
+    "yolo_model_path": "weights/Rumex.pt",
+    "confidence_threshold": 0.4,
+    "trigger_lijn_y_percentage": 0.60, 
+    "zones_aantal": 6,
+    "zone_offsets_meters": [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5] 
+  }
+}

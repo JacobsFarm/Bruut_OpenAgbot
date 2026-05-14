@@ -1,0 +1,34 @@
+{
+  "system_overview": "RTSP stream capture and synchronized frame batching mechanism for AI detection.",
+  "core_components": [
+    {
+      "name": "LoadStreams",
+      "origin": "ultralytics.data.loaders",
+      "role": "Handles RTSP network connection, video stream decoding, and raw numpy frame extraction."
+    },
+    {
+      "name": "StreamBatcher",
+      "origin": "streaming.py",
+      "role": "Manages multi-threading (one thread per camera), thread synchronization via Condition locks, and yields synchronized frame batches to the main detector loop."
+    },
+    {
+      "name": "FrameCollector",
+      "origin": "collector.py",
+      "role": "Acts as a shared memory buffer. Maps frames to their source URLs and enforces a retention policy (keeping only the N most recent frames) to prevent memory leaks and latency."
+    }
+  ],
+  "workflow_steps": [
+    "1. Initialization: StreamBatcher receives a list of RTSP URLs and creates a FrameCollector.",
+    "2. Threading: A separate daemon thread is started for each camera source.",
+    "3. Extraction: Inside each thread, LoadStreams continuously pulls new frames.",
+    "4. Buffering: Threads push new frames into the shared FrameCollector and trigger a Condition notification.",
+    "5. Synchronization: The main StreamBatcher iterator waits until the batch is ready (frames present from all sources, or >1 frame from any source to prevent blocking).",
+    "6. Yielding: Once ready, it takes a snapshot of the current frames, clears the buffer, and yields the batch to the AI model."
+  ],
+  "key_technologies": [
+    "Python Threading & Condition Locks",
+    "Ultralytics LoadStreams",
+    "NumPy (ndarray)",
+    "Python Generator/Iterator Pattern"
+  ]
+}

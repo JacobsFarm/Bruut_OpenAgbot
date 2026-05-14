@@ -1,0 +1,1 @@
+# Functies om JSON plannen te lezen en logs te schrijven

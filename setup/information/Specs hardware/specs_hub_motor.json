@@ -1,0 +1,55 @@
+{
+  "product_specifications": {
+    "usage": {
+      "intent_of_use": "Agricultural purposes",
+      "operational_conditions": {
+        "temperature_range": "-20°C to +40°C",
+        "protection_level": "IP66 (do not submerge)"
+      }
+    },
+    "compliance": {
+      "certificates": [
+        "TüV"
+      ],
+      "warranty": {
+        "b2b": "1 Year",
+        "b2c": "2 Year"
+      }
+    },
+    "motor_details": {
+      "motor_type": "Brushless S1 working conditions",
+      "power": "550Watt 48V",
+      "max_revolutions": "96.6 RPM",
+      "slot_number": 18,
+      "number_of_poles": "2P=20",
+      "speed_signal": "6 A/circle",
+      "inner_gear": "Self lubricating",
+      "speed_ratio": "5:0",
+      "thermal_protection": {
+        "motor_protection_temp": "105°C",
+        "motor_cut_off_temp": "110°C"
+      }
+    },
+    "performance": {
+      "pulling_force": "50Kgf (with 4.00/4.80-8 tractor tire)",
+      "v_max": "6km/u",
+      "energy_requirement_full_power": "1.002 Watt",
+      "current_consumption": {
+        "standard": "9.0Ah",
+        "max": "20+Ah"
+      },
+      "max_axle_load": "500Kg"
+    },
+    "physical_specs": {
+      "rim": {
+        "size": "8 inch",
+        "surface_treatment": "Black coating"
+      },
+      "tire_type": "Agricultural 4.00/4.80-8",
+      "cabling": {
+        "type": "3 x 2.5mm2 + 8 x 0.14mm2",
+        "length": "200mm"
+      }
+    }
+  }
+}

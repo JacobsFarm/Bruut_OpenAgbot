@@ -1,0 +1,54 @@
+{
+  "project_name": "Bruut OpenAgbot",
+  "architecture": "Hierarchical Parametric Design",
+  "naming_convention": "English snake_case",
+  "file_tree": {
+    "root": "Bruut_OpenAgbot/",
+    "structure": {
+      "config": [
+        "parameters.scad"
+      ],
+      "parts": [
+        "bracket_side_plate.scad",
+        "bracket_top_plate.scad",
+        "chassis_beam.scad",
+        "main_base_plate.scad",
+        "upright_wall.scad",
+        "protection_cover.scad"
+      ],
+      "assemblies": [
+        "wheel_unit_asm.scad",
+        "chassis_frame_asm.scad"
+      ],
+      "exports": [
+        "nesting_laser_cut.scad"
+      ],
+      "main_assembly.scad": "Root entry point"
+    }
+  },
+  "folder_functions": {
+    "config": "Contains the central variables and settings loaded by every other file in the project.",
+    "parts": "Contains the individual geometry of each physical part (plates and beams). This is where the 'difference' logic for bolt holes occurs.",
+    "assemblies": "Combines individual components from the 'parts' folder into functional groups, such as a complete wheel unit or the chassis frame.",
+    "exports": "Specialized scripts that flatten 3D parts for DXF export or prepare components for 3D printing."
+  },
+  "file_responsibilities": {
+    "parameters.scad": "The single source of truth for all dimensions (width, length, bolt diameters, drill patterns).",
+    "bracket_side_plate.scad": "The vertical axle holder for the motor bracket (laser-cut component).",
+    "bracket_top_plate.scad": "The horizontal mounting plate for the wheel module (laser-cut component).",
+    "chassis_beam.scad": "Steel hollow profiles featuring pre-calculated drill patterns for assembly.",
+    "main_base_plate.scad": "The primary connecting plate for the upper structure (laser-cut component).",
+    "upright_wall.scad": "Vertical side walls including structural reinforcements (hulls).",
+    "protection_cover.scad": "The outer protective shell that covers the electronics and mechanical parts.",
+    "wheel_unit_asm.scad": "Assembles the hub motor with the top and side plates of the mounting bracket.",
+    "chassis_frame_asm.scad": "Integrates the beams, base plate, and covers into the main structural frame.",
+    "nesting_laser_cut.scad": "Handles 2D projection of all plates to generate DXF files for CNC laser cutting.",
+    "main_assembly.scad": "The primary visualization file that positions the 4 wheel modules and the frame in 3D space."
+  },
+  "design_rules": [
+    "Always use 'include <../config/parameters.scad>' at the top of every sub-file.",
+    "Model every part centered (center=true) to ensure easy symmetry and mirroring.",
+    "Never use hardcoded numbers; derive all dimensions from the variables in parameters.scad.",
+    "Ensure parts intended for DXF export are positioned exactly at Z=0 within their local modules."
+  ]
+}
