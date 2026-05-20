@@ -36,8 +36,8 @@ bolt_dia = 14.2;
 bracket_thick = 6;
 bracket_bolt_diameter = 10.2;       
 tire_clearance = 130;      
-side_plate_top_width = 200;
-side_plate_width = 200;
+side_plate_top_width = 240;
+side_plate_width = 240;
 
 //Side plate
 axle_bottom_dist = 35;
