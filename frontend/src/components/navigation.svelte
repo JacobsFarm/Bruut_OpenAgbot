@@ -3,7 +3,9 @@
 
     let status = "Gestopt";
     let waypoints = [];
-    let baseSpeed = 1500;
+    
+    // De nieuwe variabele voor doelsnelheid in km/h (standaard op 3.0 km/h)
+    let targetSpeed = 3.0; 
 
     async function fetchWaypoints() {
         try {
@@ -44,7 +46,8 @@
             const res = await fetch('/api/start_nav', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ base_pwm: baseSpeed })
+                // We sturen nu target_speed_kmh in plaats van base_pwm
+                body: JSON.stringify({ target_speed_kmh: targetSpeed })
             });
             if (res.ok) {
                 status = "Navigeren langs alle punten";
@@ -61,7 +64,8 @@
             const res = await fetch('/api/start_nav_direct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lat: wp.lat, lon: wp.lon, base_pwm: baseSpeed })
+                // We sturen nu target_speed_kmh mee voor het directe punt
+                body: JSON.stringify({ lat: wp.lat, lon: wp.lon, target_speed_kmh: targetSpeed })
             });
             if (res.ok) {
                 status = `Navigeren naar specifiek punt`;
@@ -90,8 +94,8 @@
     <p>Huidige Status: <strong>{status}</strong></p>
     
     <div class="slider-container">
-        <label for="speed">Basis Snelheid: {baseSpeed}</label>
-        <input type="range" id="speed" min="700" max="3100" step="50" bind:value={baseSpeed} />
+        <label for="speed">Doelsnelheid: {targetSpeed.toFixed(1)} km/h</label>
+        <input type="range" id="speed" min="1.0" max="7.7" step="0.1" bind:value={targetSpeed} />
     </div>
 
     <div class="controls">
@@ -141,10 +145,13 @@
         display: block;
         font-weight: bold;
         margin-bottom: 10px;
+        font-size: 1.1em;
+        color: #333;
     }
     .slider-container input[type="range"] {
         width: 80%;
         cursor: pointer;
+        accent-color: #28a745;
     }
     .waypoints-list {
         margin: 20px 0;

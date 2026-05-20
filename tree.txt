@@ -1,0 +1,127 @@
+Bruut_OpenAgbot
+    ├── .github
+        └── workflows
+            └── deploy.yml
+    ├── app
+        ├── api
+            ├── __init__.py
+            └── endpoints.py
+        ├── hardware
+            ├── __init__.py
+            ├── gps_logic.py
+            └── motor_logic.py
+        ├── services
+            ├── __init__.py
+            ├── data_handler.py
+            ├── logger.py
+            └── navigator.py
+        ├── vision
+            ├── __init__.py
+            ├── detection_logger.py
+            ├── streamer.py
+            └── weed_tracker.py
+        └── __init__.py
+    ├── Arduino
+        └── arduino_controlling_dac.cpp
+    ├── CAD_designs
+        ├── assemblies
+            ├── chassis_frame_asm.scad
+            └── wheel_unit_asm.scad
+        ├── config
+            └── parameters.scad
+        ├── exports
+            ├── drill_jigs_3d_print.scad
+            └── nesting_laser_cut.scad
+        ├── imports
+            ├── hubmotor_quinder.stl
+            ├── hubmotor_quinder_ring_left.stl
+            └── hubmotor_quinder_ring_right.stl
+        ├── older_models
+            ├── Bruut_OpenAgbot.scad
+            └── Bruut_OpenAgbot_3D_printable.scad
+        ├── parts
+            ├── axle_bracket.scad
+            ├── bracket_side_plate.scad
+            ├── bracket_top_plate.scad
+            ├── chassis_beam.scad
+            ├── main_base_plate.scad
+            ├── protection_cover.scad
+            └── upright_wall.scad
+        ├── templates
+            ├── stl's
+                └── axle_bracket_drill_template.stl
+            ├── axle_bracket_drill_template.scad
+            └── template_instructions.json
+        ├── instructions.json
+        ├── LICENSE
+        ├── main_assembly.scad
+        ├── plans.json
+        ├── README.md
+        └── tree.txt
+    ├── data
+        ├── logs
+            ├── rit_1_20_05_2026.csv
+            ├── rit_2_20_05_2026.csv
+            └── rit_3_20_05_2026.csv
+        └── config.example.json
+    ├── frontend
+        ├── public
+            └── vite.svg
+        ├── src
+            ├── components
+                ├── camera.svelte
+                ├── cockpit.svelte
+                ├── dashboard.svelte
+                ├── motor.svelte
+                └── navigation.svelte
+            ├── lib
+                └── assets
+                    └── svelte.svg
+            ├── app.css
+            ├── App.svelte
+            ├── global.css
+            └── main.js
+        ├── index.html
+        ├── jsconfig.json
+        ├── package-lock.json
+        ├── package.json
+        ├── README.md
+        ├── svelte.config.js
+        └── vite.config.js
+    ├── setup
+        └── information
+            ├── Specs hardware
+                ├── images IMU
+                    └── Schermafbeelding 2026-04-19 165255sfas.png
+                ├── images MCP4728 board
+                    ├── Schermafbeelding 2026-04-17 140402.png
+                    ├── Schermafbeelding 2026-04-17 140422.png
+                    └── Schermafbeelding 2026-04-17 140433.png
+                ├── Arducam UC 852.md
+                ├── Datasheet_AS-RTK4-X20D-NH-00_simpleRTK_4_Dual.pdf
+                ├── hardware.json
+                ├── IMU.md
+                ├── MCP4728 Quad DAC specs.md
+                ├── specs_hub_motor.json
+                └── Venus USB3.0 Industrial Color Camera.md
+            ├── info_rtsp_processing.json
+            ├── Linux_information.md.md
+            ├── Readme.md
+            └── throttle_dac_speed_table.json
+    ├── Single_script_code
+        ├── conversion_tensorRT_jetson.py
+        ├── DAC_test_versie_V5.py
+        ├── extract_images.py
+        ├── Extract_route.py
+        ├── Analyze_route.py
+        ├── heading_test.py
+        ├── RTK_Waypoint_Logger.py
+        ├── show_data.py
+        ├── test_rtk.py
+        └── throttle_mapper.py
+    ├── weights
+        └── NOTES.txt
+    ├── LICENSE
+    ├── README.md
+    ├── requirements.txt
+    └── run.py

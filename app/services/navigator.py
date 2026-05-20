@@ -2,50 +2,78 @@ import math
 import time
 import threading
 from collections import deque
+from app.services.logger import DriveLogger
 
 class Navigator:
     def __init__(self, gps_sys, motor_ctrl):
         self.gps = gps_sys
         self.motor = motor_ctrl
+        self.logger = DriveLogger() # Koppel de telemetrie logger
         self.waypoints = []
-        self.base_pwm = 1500
+        
+        # State variabelen
+        self.doel_snelheid_kmh = 0.0
         self.active = False
         self.thread = None
 
         # ==========================================
-        # --- JOUW TUNING PARAMETERS VOOR HET VELD ---
+        # --- GEOPTIMALISEERDE TUNING PARAMETERS ---
         # ==========================================
-        self.kp = 4.0      # Stuurkracht: Hoe hard stuurt hij naar de doellijn?
-        self.kd = 8.0      # Schokbreker: Hoe hard remt hij de draai af? (Skid-steer zweepslag filter)
-        self.k_xte = 20.0  # Lijn-compensatie: Extra graden tegensturen per meter naast de lijn
+        # STUREN (PD-Regelaar)
+        self.kp = 12.0     # Agressiever terugsturen naar de lijn
+        self.kd = 18.0     # Zwaardere schokbreker om slingeren te voorkomen
+        self.k_xte = 10.0  # Iets zachtere reactie op XTE meters (voorkomt paniek)
         
+        # SNELHEID CRUISE CONTROL (PI-Regelaar)
+        self.kp_snelheid = 500.0  # Gas bijgeven als hij afwijkt (bijv. door modder)
+        self.ki_snelheid = 250.0  # Geheugen: bouwt extra gas op als hij structureel traag blijft
+
         # --- GPS Filtering ---
         self._heading_buffer = deque(maxlen=4)
 
-        # --- PWM smoothing ---
-        self._max_pwm_stap = 30 # Maximaal toegestane PWM-sprong per 0.1 seconde
-        self._huidige_links = None
-        self._huidige_rechts = None
+        # --- Actuele status ---
+        self._huidige_links = 700
+        self._huidige_rechts = 700
+        self._vorige_actuele_positie = None
+        self._gefilterde_snelheid_mps = 0.0 # Gemeten GPS snelheid in meter/seconde
+        self._speed_integraal = 0.0         # Geheugen voor de Cruise Control
 
-        # --- PD state ---
+        # --- Stuur state ---
         self._vorige_fout = 0.0
         self._vorige_tijd = None
 
-    def start(self, waypoints, base_pwm=1500):
+    def kmh_naar_dac(self, kmh):
+        """Zet de theoretische snelheid om naar een DAC basiswaarde (Feedforward)"""
+        if kmh <= 0.1:
+            return 700 
+            
+        dac = (kmh / 3.6 + 0.96) * 1000
+        # 1200 is het fysieke motor startpunt
+        return max(1200, min(3100, int(dac)))
+
+    def start(self, waypoints, target_speed_kmh=3.0):
+        # Maak een nieuwe CSV log aan voor deze rit
+        self.logger.start_nieuwe_rit()
+        
         self.waypoints = waypoints
-        self.base_pwm = base_pwm
-        self._huidige_links = base_pwm
-        self._huidige_rechts = base_pwm
+        self.doel_snelheid_kmh = target_speed_kmh
+        
+        # Reset waardes voor een schone start
+        self._huidige_links = 700
+        self._huidige_rechts = 700
         self._vorige_fout = 0.0
         self._vorige_tijd = None
+        self._vorige_actuele_positie = None
+        self._gefilterde_snelheid_mps = 0.0
+        self._speed_integraal = 0.0
         self._heading_buffer.clear()
+        
         self.active = True
         self.thread = threading.Thread(target=self._navigate_loop, daemon=True)
         self.thread.start()
 
     def stop(self):
         self.active = False
-        # NOODSTOP: De hardware rem wordt geactiveerd met 700!
         self.motor.stuur_motoren(700, 700) 
 
     # ------------------------------------------------------------------
@@ -75,7 +103,6 @@ class Navigator:
         if raw == 0.0:
             return 0.0
 
-        # Alleen toevoegen als de waarde nieuw is (voorkomt stale data in buffer bij 1Hz)
         if len(self._heading_buffer) == 0 or math.degrees(self._heading_buffer[-1]) != raw:
             self._heading_buffer.append(math.radians(raw))
 
@@ -83,15 +110,20 @@ class Navigator:
         cos_gem = sum(math.cos(h) for h in self._heading_buffer) / len(self._heading_buffer)
         return (math.degrees(math.atan2(sin_gem, cos_gem)) + 360) % 360
 
-    def _smooth_pwm(self, doel_links, doel_rechts):
-        def stap(huidig, doel):
-            delta = doel - huidig
-            delta = max(-self._max_pwm_stap, min(self._max_pwm_stap, delta))
-            return huidig + delta
-
-        self._huidige_links  = stap(self._huidige_links,  doel_links)
-        self._huidige_rechts = stap(self._huidige_rechts, doel_rechts)
-        return int(self._huidige_links), int(self._huidige_rechts)
+    def _smooth_dac(self, huidig, doel):
+        if huidig < 1200 and doel >= 1200:
+            huidig = 1200
+            
+        if doel <= 700 and huidig <= 1200:
+            return 700
+            
+        verschil = doel - huidig
+        if verschil > 100:
+            return huidig + 100
+        elif verschil < -100:
+            return huidig - 100
+        else:
+            return doel
 
     # ------------------------------------------------------------------
     # Hoofd navigatielus
@@ -107,83 +139,140 @@ class Navigator:
                 continue
 
             target = self.waypoints[wp_idx]
-            
-            # Stel initieel startpunt in voor de allereerste lijn
             if prev_wp is None:
                 prev_wp = dict(curr)
 
-            dist = self._haversine(curr["lat"], curr["lon"], target["lat"], target["lon"])
+            # Tijd en afstand sinds vorige loop meten (Voor Snelheid en Sturen)
+            now = time.time()
+            if self._vorige_tijd is None:
+                dt = 0.1
+            else:
+                dt = max(0.01, min(now - self._vorige_tijd, 0.5))
+            
+            # --- 1. WERKELIJKE GPS SNELHEID BEREKENEN ---
+            if self._vorige_actuele_positie is not None:
+                verplaatsing = self._haversine(self._vorige_actuele_positie["lat"], self._vorige_actuele_positie["lon"], curr["lat"], curr["lon"])
+                ruwe_snelheid_mps = verplaatsing / dt
+                # Filter om GPS ruis in kleine stapjes glad te strijken
+                self._gefilterde_snelheid_mps = (0.2 * ruwe_snelheid_mps) + (0.8 * self._gefilterde_snelheid_mps)
+            
+            self._vorige_actuele_positie = dict(curr)
 
-            if dist < 1.0:
+            dist_to_target = self._haversine(curr["lat"], curr["lon"], target["lat"], target["lon"])
+
+            if dist_to_target < 1.0:
                 print(f"[NAVIGATOR] Waypoint {wp_idx} bereikt.")
-                prev_wp = dict(target) # Huidig doel wordt startpunt voor volgende lijn
+                prev_wp = dict(target) 
                 wp_idx += 1
                 self._vorige_fout = 0.0
                 self._vorige_tijd = None
+                self._speed_integraal = 0.0 # Reset geheugen bij nieuw waypoint
                 continue
 
             current_heading = self._gefilterde_heading()
 
             if current_heading == 0.0:
                 print("[NAVIGATOR] Wachten op Dual-GPS heading...")
-                self.motor.stuur_motoren(1500, 1500)
+                self._huidige_links = self._smooth_dac(self._huidige_links, 700)
+                self._huidige_rechts = self._smooth_dac(self._huidige_rechts, 700)
+                self.motor.stuur_motoren(self._huidige_links, self._huidige_rechts)
                 time.sleep(0.5)
                 continue
 
-            # 1. Bepaal lijn tussen vorige WP en target WP
+            # --- 2. STUUR LOGICA (Lijn volgen) ---
             target_bearing = self._bearing(curr["lat"], curr["lon"], target["lat"], target["lon"])
             line_bearing = self._bearing(prev_wp["lat"], prev_wp["lon"], target["lat"], target["lon"])
             curr_bearing = self._bearing(prev_wp["lat"], prev_wp["lon"], curr["lat"], curr["lon"])
             dist_from_prev = self._haversine(prev_wp["lat"], prev_wp["lon"], curr["lat"], curr["lon"])
             
-            # 2. Cross-Track Error (XTE) compensatie
             angle_diff = math.radians(curr_bearing - line_bearing)
             xte = math.asin(math.sin(dist_from_prev / 6371000) * math.sin(angle_diff)) * 6371000
             
             correction = max(-50.0, min(50.0, xte * self.k_xte))
             corrected_target_bearing = (target_bearing - correction) % 360
 
-            # 3. Fout berekenen
             fout = corrected_target_bearing - current_heading
             if fout > 180: fout -= 360
             if fout < -180: fout += 360
-
-            # 4. PD regelaar met tijdsdelta
-            now = time.time()
-            if self._vorige_tijd is None:
-                dt = 0.1
-            else:
-                dt = max(0.01, min(now - self._vorige_tijd, 0.5))
 
             d_fout = (fout - self._vorige_fout) / dt
             self._vorige_fout = fout
             self._vorige_tijd = now
 
             turn = (self.kp * fout) + (self.kd * d_fout)
-            turn = max(-200, min(200, turn))
+            turn = max(-400, min(400, turn))
 
-            # 5. Skid-steer Bocht-vertraging (Geef de robot koppel om te draaien)
-            hoek_penalty = min(1.0, abs(fout) / 30.0) 
-            snelheids_factor = 1.0 - (hoek_penalty * 0.5) 
-            actuele_base_pwm = 1500 + ((self.base_pwm - 1500) * snelheids_factor)
+            # --- 3. DYNAMISCHE SNELHEID & CRUISE CONTROL ---
+            # Versoepelde bochten-rem: Remt pas maximaal af bij 35 graden fout (was 20)
+            hoek_penalty = min(1.0, abs(fout) / 35.0) 
+            snelheids_factor = max(0.0, 1.0 - (hoek_penalty * 0.8))
+            
+            doel_snelheid_mps = (self.doel_snelheid_kmh / 3.6) * snelheids_factor
+            basis_theoretische_dac = self.kmh_naar_dac(doel_snelheid_mps * 3.6)
 
-            doel_links  = actuele_base_pwm + turn
-            doel_rechts = actuele_base_pwm - turn
+            # PI Regelaar om afwijking te corrigeren
+            snelheids_fout = doel_snelheid_mps - self._gefilterde_snelheid_mps
+            
+            self._speed_integraal += snelheids_fout * dt
+            self._speed_integraal = max(-1.0, min(1.0, self._speed_integraal))
 
-            # 6. Zachte PWM-overgang
-            links, rechts = self._smooth_pwm(doel_links, doel_rechts)
+            pi_correctie = (self.kp_snelheid * snelheids_fout) + (self.ki_snelheid * self._speed_integraal)
+            actuele_base_dac = basis_theoretische_dac + pi_correctie
 
-            # Veiligheid
-            links = max(1000, min(2000, links))
-            rechts = max(1000, min(2000, rechts))
+            # --- 4. MOTOREN AANSTUREN ---
+            doel_links  = actuele_base_dac + turn
+            doel_rechts = actuele_base_dac - turn
 
-            # 7. Aandrijving
-            self.motor.stuur_motoren(links, rechts)
+            # --- Actieve Stuur-Behoud (Drag-Wheel Fix op 1300 DAC) ---
+            if self.doel_snelheid_kmh > 0.1:
+                if doel_links < 1300:
+                    tekort = 1300 - doel_links
+                    doel_links = 1300
+                    doel_rechts += tekort
+                elif doel_rechts < 1300:
+                    tekort = 1300 - doel_rechts
+                    doel_rechts = 1300
+                    doel_links += tekort
 
-            # Debug output terminal
-            print(f"[NAV] hdg={current_heading:.1f}° doel={target_bearing:.1f}° "
-                  f"fout={fout:.1f}° xte={xte:.2f}m d_fout={d_fout:.2f} "
-                  f"turn={turn:.0f} L={links} R={rechts} dist={dist:.2f}m")
+            # Harde veiligheidslimieten van de hardware (700 = noodstop, 3100 = motor max)
+            doel_links = int(max(700, min(3100, doel_links)))
+            doel_rechts = int(max(700, min(3100, doel_rechts)))
+
+            # Toepassen van de "Stapjes van 100" smoothing zodat correcties vloeiend verlopen
+            self._huidige_links = self._smooth_dac(self._huidige_links, doel_links)
+            self._huidige_rechts = self._smooth_dac(self._huidige_rechts, doel_rechts)
+
+            self.motor.stuur_motoren(self._huidige_links, self._huidige_rechts)
+
+            # --- 5. DATA LOGGEN ---
+            actuele_kmh = self._gefilterde_snelheid_mps * 3.6
+            huidige_fix = curr.get("fix", 0)
+            huidige_hdop = curr.get("hdop", 99.0)
+
+            self.logger.log_regel(
+                wp_idx=wp_idx,
+                lat=curr["lat"],
+                lon=curr["lon"],
+                fix=huidige_fix,
+                hdop=huidige_hdop,
+                heading=current_heading,
+                doel_heading=target_bearing,
+                fout=fout,
+                xte=xte,
+                doel_kmh=self.doel_snelheid_kmh,
+                echt_kmh=actuele_kmh,
+                turn=turn,
+                pi_corr=pi_correctie,
+                i_term=self._speed_integraal,
+                links=self._huidige_links,
+                rechts=self._huidige_rechts,
+                dist=dist_to_target,
+                dt=dt
+            )
+
+            print(f"[NAV] hdg={current_heading:.1f}° fout={fout:.1f}° "
+                  f"Doel={doel_snelheid_mps * 3.6:.1f} Echt={actuele_kmh:.1f} "
+                  f"PICorr={pi_correctie:.0f} L={self._huidige_links} R={self._huidige_rechts}")
 
             time.sleep(0.1)
 

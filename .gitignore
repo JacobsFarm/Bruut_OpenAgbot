@@ -19,6 +19,9 @@ frontend/.svelte-kit/
 .vercel
 .netlify
 
+# --- CAD / 3D Modellen ---
+CAD_designs/imports/*.stl
+
 # --- Python / Flask ---
 __pycache__/
 *.py[cod]

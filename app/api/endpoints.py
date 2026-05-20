@@ -26,13 +26,15 @@ class Waypoint(BaseModel):
     lat: float
     lon: float
 
+# AANGEPAST: We verwachten nu target_speed_kmh als float (bijv. 3.0)
 class NavCommand(BaseModel):
-    base_pwm: int
+    target_speed_kmh: float
 
+# AANGEPAST: We verwachten nu target_speed_kmh als float (bijv. 3.0)
 class DirectNavCommand(BaseModel):
     lat: float
     lon: float
-    base_pwm: int
+    target_speed_kmh: float
 
 @router.get("/status")
 def get_status():
@@ -83,12 +85,15 @@ def start_navigation(cmd: NavCommand):
     wps = laad_waypoints()
     if not wps:
         raise HTTPException(status_code=400, detail="Geen waypoints gevonden")
-    navigator.start(wps, cmd.base_pwm)
+    
+    # AANGEPAST: Geef target_speed_kmh mee aan de navigator
+    navigator.start(wps, target_speed_kmh=cmd.target_speed_kmh)
     return {"status": "navigatie gestart"}
 
 @router.post("/start_nav_direct")
 def start_nav_direct(cmd: DirectNavCommand):
-    navigator.start([{"lat": cmd.lat, "lon": cmd.lon}], cmd.base_pwm)
+    # AANGEPAST: Geef target_speed_kmh mee aan de navigator
+    navigator.start([{"lat": cmd.lat, "lon": cmd.lon}], target_speed_kmh=cmd.target_speed_kmh)
     return {"status": "navigatie gestart naar specifiek punt"}
 
 @router.post("/stop_nav")
