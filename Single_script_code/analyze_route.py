@@ -5,7 +5,7 @@ import math
 # ==========================================
 # CONFIGURATIE
 # ==========================================
-BESTANDSNAAM = "document_name.csv"
+BESTANDSNAAM = "rit_1_20_05_2026.csv" # Pas dit aan naar je nieuwste rit
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -45,7 +45,8 @@ def percentiel(gesorteerd, p):
 def haal_live_parameters_uit_navigator(nav_pad):
     params = {
         "kp": "N/B", "kd": "N/B", "k_xte": "N/B",
-        "kp_snelheid": "N/B", "ki_snelheid": "N/B"
+        "kp_snelheid": "N/B", "ki_snelheid": "N/B",
+        "look_ahead": "N/B" # <-- NIEUW
     }
     if not os.path.exists(nav_pad):
         return params
@@ -65,6 +66,8 @@ def haal_live_parameters_uit_navigator(nav_pad):
                     params["kp_snelheid"] = line.split("=")[1].split("#")[0].strip()
                 elif "self.ki_snelheid =" in line:
                     params["ki_snelheid"] = line.split("=")[1].split("#")[0].strip()
+                elif "self.look_ahead_dist =" in line: # <-- NIEUW
+                    params["look_ahead"] = line.split("=")[1].split("#")[0].strip()
     except:
         pass
     return params
@@ -81,7 +84,7 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
     totale_regels = 0
 
     # Bestaande metrics
-    xte_gesigneerd_lijst = []          # Gesigneerd XTE (links/rechts van lijn)
+    xte_gesigneerd_lijst = []          
     xte_abs_lijst = []
     fout_lijst = []
     snel_doel_lijst, snel_echt_lijst = [], []
@@ -94,20 +97,23 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
 
     # Nieuwe metrics
     hdop_lijst = []
-    hdop_slecht_count = 0              # HDOP > 1.5 = matige GPS precisie
-    heading_fout_gesigneerd = []       # Gesigneerde koersfout (richting drift)
-    pi_corr_lijst = []                 # Ruwe PI-correctie waarden
-    afstand_wp_lijst = []              # Afstand tot waypoint
-    wp_bezoeken = {}                   # {wp_index: aantal regels}
-    gps_coords = []                    # (lat, lon) voor afstandberekening
-    i_term_positief = 0                # PI integraal windup richting
+    hdop_slecht_count = 0              
+    heading_fout_gesigneerd = []       
+    pi_corr_lijst = []                 
+    afstand_wp_lijst = []              
+    wp_bezoeken = {}                   
+    gps_coords = []                    
+    i_term_positief = 0                
     i_term_negatief = 0
-    grote_i_term_count = 0             # Integraal windup > drempel
-    pi_corr_hoog_count = 0            # Grote correcties (overreactie)
-    stagnatie_count = 0                # Robot staat stil terwijl doel > 0
-    dac_asymmetrie_hoog_count = 0      # Grote DAC asymmetrie (mechanisch probleem?)
-    xte_links_count = 0               # XTE links van lijn (negatief)
-    xte_rechts_count = 0              # XTE rechts van lijn (positief)
+    grote_i_term_count = 0             
+    pi_corr_hoog_count = 0            
+    stagnatie_count = 0                
+    dac_asymmetrie_hoog_count = 0      
+    xte_links_count = 0               
+    xte_rechts_count = 0              
+    
+    # Tracking voor look-ahead data in CSV
+    lookahead_data_aanwezig = False
 
     I_TERM_DREMPEL = 5.0
     PI_CORR_DREMPEL = 200.0
@@ -138,6 +144,12 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
                 wp_idx = int(row['WP_Doel'])
                 lat = float(row['Lat'])
                 lon = float(row['Lon'])
+                
+                # Check of look-ahead data in deze row/CSV zit (veilig uilezen)
+                la_lat = row.get('Lookahead_Lat', '')
+                la_lon = row.get('Lookahead_Lon', '')
+                if la_lat and la_lon:
+                    lookahead_data_aanwezig = True
 
                 # --- Lijsten vullen ---
                 xte_gesigneerd_lijst.append(xte_gesigneerd)
@@ -168,37 +180,27 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
                 # --- Tellers ---
                 if xte > 0.20:
                     hoge_afwijking_count += 1
-
                 if fix == 4:
                     fix_ok_count += 1
                     met_geldige_gps += 1
-
                 if turn >= 390:
                     stuur_maxed_count += 1
-
                 if dt > 0.15:
                     hapering_count += 1
-
                 if hdop > 1.5:
                     hdop_slecht_count += 1
-
                 if i_term > 0:
                     i_term_positief += 1
                 else:
                     i_term_negatief += 1
-
                 if abs(i_term) > I_TERM_DREMPEL:
                     grote_i_term_count += 1
-
                 if abs(pi_corr) > PI_CORR_DREMPEL:
                     pi_corr_hoog_count += 1
-
                 if dac_verschil > DAC_ASYM_DREMPEL:
                     dac_asymmetrie_hoog_count += 1
-
                 if snel_doel > 0 and snel_echt < 0.1:
                     stagnatie_count += 1
-
                 if xte_gesigneerd > 0:
                     xte_rechts_count += 1
                 elif xte_gesigneerd < 0:
@@ -217,8 +219,6 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
         return
 
     # --- Nabewerking ---
-
-    # Totale gereden afstand via GPS-coördinaten
     totale_afstand_m = 0.0
     for i in range(1, len(gps_coords)):
         totale_afstand_m += haversine_afstand(
@@ -226,35 +226,25 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
             gps_coords[i][0], gps_coords[i][1]
         )
 
-    # Totale rijtijd
     totale_tijd_sec = sum(dt_lijst)
     minuten = int(totale_tijd_sec // 60)
     seconden = totale_tijd_sec % 60
-
-    # Gemiddelde tijd per waypoint
-    gem_regels_per_wp = totale_regels / max(len(wp_bezoeken), 1)
     gem_tijd_per_wp = (totale_tijd_sec / max(len(wp_bezoeken), 1))
-
-    # Snelheidsfout gemiddeld
     snel_fout_lijst = [abs(d - e) for d, e in zip(snel_doel_lijst, snel_echt_lijst)]
 
-    # Percentiel XTE (90e percentiel = P90)
     xte_gesorteerd = sorted(xte_abs_lijst)
     xte_p90 = percentiel(xte_gesorteerd, 90)
     xte_p95 = percentiel(xte_gesorteerd, 95)
 
-    # Heading bias (systematische koersfout)
     gem_heading_fout = sum(heading_fout_gesigneerd) / len(heading_fout_gesigneerd)
     heading_bias_richting = "RECHTS (robot draait te ver CW)" if gem_heading_fout > 0.5 else \
                             "LINKS (robot draait te ver CCW)" if gem_heading_fout < -0.5 else \
                             "Geen significante bias"
 
-    # XTE voorkeurszijde
     xte_bias = "RECHTS van lijn" if xte_rechts_count > xte_links_count * 1.2 else \
                "LINKS van lijn" if xte_links_count > xte_rechts_count * 1.2 else \
                "Geen duidelijke voorkeur"
 
-    # PI windup richting
     if i_term_positief > i_term_negatief * 1.5:
         windup_richting = "Positief (structurele ondercorrectie)"
     elif i_term_negatief > i_term_positief * 1.5:
@@ -262,8 +252,10 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
     else:
         windup_richting = "Gebalanceerd"
 
-    # Efficiency: werkelijke vs. doelsnelheid
     gem_snel_efficiëntie = (sum(snel_echt_lijst) / max(sum(snel_doel_lijst), 0.001)) * 100
+
+    # Look-ahead status string
+    la_status = "Aanwezig" if lookahead_data_aanwezig else "Niet geregistreerd (Oude log)"
 
     # ==========================================
     # RAPPORT OPBOUWEN
@@ -278,7 +270,8 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
         f"- Rijtijd           : {minuten}m {seconden:.1f}s ({totale_tijd_sec:.1f} sec totaal)\n"
         f"- Gereden afstand   : {totale_afstand_m:.1f} m  ({totale_afstand_m / 1000:.3f} km)\n"
         f"- Waypoints bereikt : {len(wp_bezoeken)}  (indices: {sorted(wp_bezoeken.keys())})\n"
-        f"- Gem. tijd per WP  : {gem_tijd_per_wp:.1f} s\n\n"
+        f"- Gem. tijd per WP  : {gem_tijd_per_wp:.1f} s\n"
+        f"- Look-Ahead Coords : {la_status} in CSV\n\n" # <-- GEEFT AAN OF LA-DATA IS OPGESLAGEN
 
         f"[LIJNVOLGING]\n"
         f"- XTE Gemiddeld     : {sum(xte_abs_lijst)/len(xte_abs_lijst):.3f} m\n"
@@ -325,7 +318,8 @@ def genereer_ai_rapport(csv_pad, rapport_pad, nav_pad):
         f"- KD           : {pid['kd']}\n"
         f"- K_XTE        : {pid['k_xte']}\n"
         f"- KP_SNELHEID  : {pid['kp_snelheid']}\n"
-        f"- KI_SNELHEID  : {pid['ki_snelheid']}\n\n"
+        f"- KI_SNELHEID  : {pid['ki_snelheid']}\n"
+        f"- LOOK_AHEAD   : {pid['look_ahead']} m\n\n" # <-- VOEGT DE UITGELEZEN LOOK-AHEAD AFSTAND TOE
 
         f"Analyseer dit en geef advies.\n"
         f"=================================================="
