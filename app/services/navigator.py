@@ -19,14 +19,15 @@ class Navigator:
         # ==========================================
         # --- GEOPTIMALISEERDE TUNING PARAMETERS ---
         # ==========================================
-        # STUREN (PD-Regelaar)
-        self.kp = 12.0     # Agressiever terugsturen naar de lijn
-        self.kd = 18.0     # Zwaardere schokbreker om slingeren te voorkomen
-        self.k_xte = 10.0  # Iets zachtere reactie op XTE meters (voorkomt paniek)
+        # STUREN (Look-ahead & PD-Regelaar)
+        self.kp = 14.0              # Stuurkracht (verhoogd voor snellere correctie)
+        self.kd = 22.0              # Schokbreker (verhoogd om slingeren te dempen)
+        self.look_ahead_dist = 2.0  # Meter: hoe ver de robot vooruit kijkt op de doellijn
+        self.k_xte = 10.0           # Legacy waarde (blijft staan voor compatibiliteit analyze-script)
         
         # SNELHEID CRUISE CONTROL (PI-Regelaar)
-        self.kp_snelheid = 500.0  # Gas bijgeven als hij afwijkt (bijv. door modder)
-        self.ki_snelheid = 250.0  # Geheugen: bouwt extra gas op als hij structureel traag blijft
+        self.kp_snelheid = 500.0  
+        self.ki_snelheid = 400.0    # Verhoogd naar 400 voor snellere reactie in zware grond
 
         # --- GPS Filtering ---
         self._heading_buffer = deque(maxlen=4)
@@ -48,7 +49,6 @@ class Navigator:
             return 700 
             
         dac = (kmh / 3.6 + 0.96) * 1000
-        # 1200 is het fysieke motor startpunt
         return max(1200, min(3100, int(dac)))
 
     def start(self, waypoints, target_speed_kmh=3.0):
@@ -142,7 +142,7 @@ class Navigator:
             if prev_wp is None:
                 prev_wp = dict(curr)
 
-            # Tijd en afstand sinds vorige loop meten (Voor Snelheid en Sturen)
+            # Tijd en afstand sinds vorige loop meten
             now = time.time()
             if self._vorige_tijd is None:
                 dt = 0.1
@@ -153,7 +153,6 @@ class Navigator:
             if self._vorige_actuele_positie is not None:
                 verplaatsing = self._haversine(self._vorige_actuele_positie["lat"], self._vorige_actuele_positie["lon"], curr["lat"], curr["lon"])
                 ruwe_snelheid_mps = verplaatsing / dt
-                # Filter om GPS ruis in kleine stapjes glad te strijken
                 self._gefilterde_snelheid_mps = (0.2 * ruwe_snelheid_mps) + (0.8 * self._gefilterde_snelheid_mps)
             
             self._vorige_actuele_positie = dict(curr)
@@ -166,7 +165,7 @@ class Navigator:
                 wp_idx += 1
                 self._vorige_fout = 0.0
                 self._vorige_tijd = None
-                self._speed_integraal = 0.0 # Reset geheugen bij nieuw waypoint
+                self._speed_integraal = 0.0 
                 continue
 
             current_heading = self._gefilterde_heading()
@@ -179,19 +178,38 @@ class Navigator:
                 time.sleep(0.5)
                 continue
 
-            # --- 2. STUUR LOGICA (Lijn volgen) ---
-            target_bearing = self._bearing(curr["lat"], curr["lon"], target["lat"], target["lon"])
+            # --- 2. VERBETERDE STUUR LOGICA (Look-Ahead / Pure Pursuit) ---
             line_bearing = self._bearing(prev_wp["lat"], prev_wp["lon"], target["lat"], target["lon"])
             curr_bearing = self._bearing(prev_wp["lat"], prev_wp["lon"], curr["lat"], curr["lon"])
             dist_from_prev = self._haversine(prev_wp["lat"], prev_wp["lon"], curr["lat"], curr["lon"])
+            line_length = self._haversine(prev_wp["lat"], prev_wp["lon"], target["lat"], target["lon"])
             
+            # Bereken de Cross-Track Error (XTE)
             angle_diff = math.radians(curr_bearing - line_bearing)
             xte = math.asin(math.sin(dist_from_prev / 6371000) * math.sin(angle_diff)) * 6371000
             
-            correction = max(-50.0, min(50.0, xte * self.k_xte))
-            corrected_target_bearing = (target_bearing - correction) % 360
+            # Bereken hoever de robot is gevorderd langs de doellijn (projectie)
+            dist_along_line = dist_from_prev * math.cos(angle_diff)
+            
+            # Bereken de doel-afstand vanaf prev_wp met Pythagoras (Look-ahead)
+            if abs(xte) < self.look_ahead_dist:
+                target_dist_from_prev = dist_along_line + math.sqrt(self.look_ahead_dist**2 - xte**2)
+            else:
+                # Als de afwijking extreem groot is, kijk dan minimaal 20 cm vooruit vanaf het projectiepunt
+                target_dist_from_prev = dist_along_line + 0.2
+            
+            # Voorkom dat we voorbij het uiteindelijke waypoint schieten op dit segment
+            fraction = max(0.0, min(1.0, target_dist_from_prev / max(0.001, line_length)))
+            
+            # Bereken de exacte GPS coördinaten van het virtuele Look-Ahead punt
+            lookahead_lat = prev_wp["lat"] + fraction * (target["lat"] - prev_wp["lat"])
+            lookahead_lon = prev_wp["lon"] + fraction * (target["lon"] - prev_wp["lon"])
+            
+            # De gewenste bearing is nu DIRECT de hoek naar dit Look-Ahead punt!
+            target_bearing = self._bearing(curr["lat"], curr["lon"], lookahead_lat, lookahead_lon)
 
-            fout = corrected_target_bearing - current_heading
+            # Bereken de stuurfout (fout)
+            fout = target_bearing - current_heading
             if fout > 180: fout -= 360
             if fout < -180: fout += 360
 
@@ -203,14 +221,14 @@ class Navigator:
             turn = max(-400, min(400, turn))
 
             # --- 3. DYNAMISCHE SNELHEID & CRUISE CONTROL ---
-            # Versoepelde bochten-rem: Remt pas maximaal af bij 35 graden fout (was 20)
+            # Gecorrigeerde bochten-rem factor naar 0.5 (minder paniekerig inhouden)
             hoek_penalty = min(1.0, abs(fout) / 35.0) 
-            snelheids_factor = max(0.0, 1.0 - (hoek_penalty * 0.8))
+            snelheids_factor = max(0.0, 1.0 - (hoek_penalty * 0.5))
             
             doel_snelheid_mps = (self.doel_snelheid_kmh / 3.6) * snelheids_factor
             basis_theoretische_dac = self.kmh_naar_dac(doel_snelheid_mps * 3.6)
 
-            # PI Regelaar om afwijking te corrigeren
+            # PI Regelaar voor de Cruise Control
             snelheids_fout = doel_snelheid_mps - self._gefilterde_snelheid_mps
             
             self._speed_integraal += snelheids_fout * dt
@@ -223,7 +241,7 @@ class Navigator:
             doel_links  = actuele_base_dac + turn
             doel_rechts = actuele_base_dac - turn
 
-            # --- Actieve Stuur-Behoud (Drag-Wheel Fix op 1300 DAC) ---
+            # Drag-Wheel Fix: Zorg dat het binnenste wiel nooit onder de 1300 DAC zakt
             if self.doel_snelheid_kmh > 0.1:
                 if doel_links < 1300:
                     tekort = 1300 - doel_links
@@ -234,11 +252,10 @@ class Navigator:
                     doel_rechts = 1300
                     doel_links += tekort
 
-            # Harde veiligheidslimieten van de hardware (700 = noodstop, 3100 = motor max)
+            # Harde limieten hardware
             doel_links = int(max(700, min(3100, doel_links)))
             doel_rechts = int(max(700, min(3100, doel_rechts)))
 
-            # Toepassen van de "Stapjes van 100" smoothing zodat correcties vloeiend verlopen
             self._huidige_links = self._smooth_dac(self._huidige_links, doel_links)
             self._huidige_rechts = self._smooth_dac(self._huidige_rechts, doel_rechts)
 
@@ -267,12 +284,13 @@ class Navigator:
                 links=self._huidige_links,
                 rechts=self._huidige_rechts,
                 dist=dist_to_target,
-                dt=dt
+                dt=dt,
+                lookahead_lat=lookahead_lat, # <-- Geef het virtuele doelpunt mee
+                lookahead_lon=lookahead_lon  # <-- Geef het virtuele doelpunt mee
             )
-
             print(f"[NAV] hdg={current_heading:.1f}° fout={fout:.1f}° "
                   f"Doel={doel_snelheid_mps * 3.6:.1f} Echt={actuele_kmh:.1f} "
-                  f"PICorr={pi_correctie:.0f} L={self._huidige_links} R={self._huidige_rechts}")
+                  f"L={self._huidige_links} R={self._huidige_rechts}")
 
             time.sleep(0.1)
 
