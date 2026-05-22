@@ -9,11 +9,13 @@ import glob
 
 from app.hardware import motor_controller, gps_system
 from app.services.navigator import Navigator
+from app.services.skidsteer import SkidsteerController # <-- TOEGEVOEGD: Import voor Skidsteer
 
 vision_streamer = VisionStreamer(config)
 vision_streamer.start()
 
 navigator = Navigator(gps_system, motor_controller)
+skidsteer_controller = SkidsteerController(motor_controller) # <-- TOEGEVOEGD: Initialiseer de controller
 
 router = APIRouter()
 WAYPOINTS_FILE = 'data/waypoints.json'
@@ -45,9 +47,18 @@ def stuur_motor(cmd: MotorCommand):
     motor_controller.stuur_motoren(cmd.links, cmd.rechts)
     return {"status": "success", "links": cmd.links, "rechts": cmd.rechts}
 
+# <-- TOEGEVOEGD: Nieuwe endpoint speciaal voor Skidsteer -->
+@router.post("/skidsteer")
+def update_skidsteer(cmd: MotorCommand):
+    skidsteer_controller.set_target(cmd.links, cmd.rechts)
+    return {"status": "success", "target_l": cmd.links, "target_r": cmd.rechts}
+
 @router.post("/stop")
 def noodstop():
     navigator.stop()
+    
+    # <-- TOEGEVOEGD: Zorg dat de skidsteer smoothing ook stopt! -->
+    skidsteer_controller.stop_direct() 
     
     # HARDWARE NOODSTOP FORCEER: direct de rem-waarde 700!
     motor_controller.stuur_motoren(700, 700)
