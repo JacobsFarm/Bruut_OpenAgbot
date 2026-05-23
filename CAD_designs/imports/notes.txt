@@ -1,0 +1,1 @@
+In this directory can you place yout STL files for importing them into your designs
