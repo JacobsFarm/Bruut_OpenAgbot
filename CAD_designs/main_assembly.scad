@@ -1,7 +1,8 @@
 include <config/parameters.scad>
-include <assemblies/wheel_unit_asm.scad>
-include <assemblies/chassis_frame_asm.scad>
-include <parts/chassis_beam.scad>
+
+use <assemblies/wheel_unit_asm.scad>
+use <assemblies/chassis_frame_asm.scad>
+use <parts/chassis_beam.scad>
 
 module bruut_agbot_full() {
     for(x_pos = [-chassis_width/2, chassis_width/2]) {

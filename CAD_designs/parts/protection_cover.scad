@@ -5,7 +5,9 @@ module protection_cover(kant = 1) {
     eff_l = base_plate_length + (2 * cover_clearance);
     z_start = (connect_plate_thick / 2) - cover_overlap;
     h_wand = cover_total_height - z_start;
-    color("Gray", 0.8) translate([0, 0, z_start]) {
+    
+    // De ', 0.8' is verwijderd, waardoor het nu massief groen is
+    color("green") translate([0, 0, z_start]) union() {
         translate([0, 0, h_wand + cover_thick/2])
             cube([eff_b + cover_thick, eff_l + (2 * cover_thick), cover_thick], center=true);
         translate([kant * (bracket_total_width/2 + cover_clearance + cover_thick/2), 0, h_wand/2])
@@ -23,3 +25,6 @@ module protection_cover(kant = 1) {
         }
     }
 }
+
+// Voeg dit toe om de module te renderen:
+protection_cover(kant = 1);

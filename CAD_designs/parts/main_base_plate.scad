@@ -11,3 +11,8 @@ module main_base_plate() {
         }
     }
 }
+
+// ... (jouw code hierboven)
+
+// Voeg dit toe om de module te renderen:
+main_base_plate();
