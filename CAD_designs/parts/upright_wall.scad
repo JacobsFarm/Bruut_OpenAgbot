@@ -15,7 +15,7 @@ module upright_wall(show_bend = true, kant = 1) {
             ]);
             
             // Het gat zit hier altijd exact 20mm vanaf de rechte vouwlijn
-            translate([Hole_distance_cover, upright_height - 30])
+            translate([hole_distance_cover, upright_height - 30])
                 circle(d=20);
         }
     }

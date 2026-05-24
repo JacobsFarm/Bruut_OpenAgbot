@@ -20,7 +20,8 @@ module wheel_unit_asm() {
                 // Main Motor Body
                 translate([-97.5, 0, 0]) 
                     import("../imports/hubmotor_quinder.stl", convexity=3);
-
+                translate([0, 0, 0]) 
+                    import("../imports/tire_4.8_4.00-8.stl", convexity=3);
                 // Left Ring
                 translate([-97.5, 0, 0]) 
                     import("../imports/hubmotor_quinder_ring_left.stl", convexity=3);
