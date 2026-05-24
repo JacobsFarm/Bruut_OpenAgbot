@@ -6,9 +6,10 @@ Project for making the Bruut_OpenAgbot
 ## openscad project
 Volume 2 ( redesign (better alignments and stronger realistic design  
 <img width="569" height="396" alt="Schermafbeelding 2026-05-24 135552" src="https://github.com/user-attachments/assets/1f2a2c6e-b696-4d34-923b-221b127909f8" />
-<img width="703" height="39<img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/83a66241-c0fa-4606-bfac-83c0442ae7bd"
 <img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/17ac5686-3153-48f9-91bf-126a4f813c2c" />
-<img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/2a41694c-8539-4732-9f56-70f6ef6497fc" />
+<img width="455" height="590" alt="Schermafbeelding 2026-05-23 220955" src="https://github.com/user-attachments/assets/f652162a-c130-4c39-927e-ced67b4d7c19" />
+
+
 
 
 Volume 1
