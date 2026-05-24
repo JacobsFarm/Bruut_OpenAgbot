@@ -27,11 +27,3 @@ New cad designs after testing in the Field, stronger and more realistic designs 
 making taskcards of the detection of diseases / birdnests or Sprayed weed
 <img width="1904" height="628" alt="Schermafbeelding 2026-04-26 231133" src="https://github.com/user-attachments/assets/24dcf64c-6d9d-4f07-83c4-480092d47888" />
 
-## Sketches
-
-<img width="1792" height="2368" alt="Gemini_Generated_Image_n9f8gzn9f8gzn9f8(1)" src="https://github.com/user-attachments/assets/c2f21cff-1277-495d-9098-2a6845bc5c8c" />
-![hubmotor wiel schters](https://github.com/user-attachments/assets/dc92f9a7-eb66-4718-9b8f-7e40d45a5fa8)
-<img width="2368" height="1792" alt="Gemini_Generated_Image_owzfrtowzfrtowzf" src="https://github.com/user-attachments/assets/03cd127d-3f58-45bd-95f5-980d48b97abc" />
-
-Derde functie naast zwenkwielen is zwenkwielen met hubmotor die wanneer meer kracht nodig hebben in kunnen schakelen als je bang bent voor gras schade. Deze zwenkwielen en geven alleen kracht wanneer nodig als een extra zetje in de rug, ze doen niet actief mee in het sturen
-
