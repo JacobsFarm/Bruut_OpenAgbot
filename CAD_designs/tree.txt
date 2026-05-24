@@ -1,35 +1,46 @@
-agopenbot/
-├── assemblies
-    ├── chassis_frame_asm.scad
-    └── wheel_unit_asm.scad
-├── config
-    └── parameters.scad
-├── exports
-    ├── drill_jigs_3d_print.scad
-    └── nesting_laser_cut.scad
-├── imports
-    ├── hubmotor_quinder.stl
-    ├── hubmotor_quinder_ring_left.stl
-    └── hubmotor_quinder_ring_right.stl
-├── older_models
-    ├── Bruut_OpenAgbot.scad
-    └── Bruut_OpenAgbot_3D_printable.scad
-├── parts
-    ├── axle_bracket.scad
-    ├── bracket_side_plate.scad
-    ├── bracket_top_plate.scad
-    ├── chassis_beam.scad
-    ├── main_base_plate.scad
-    ├── protection_cover.scad
-    └── upright_wall.scad
-├── templates
-    ├── stl's
-        └── axle_bracket_drill_template.stl
-    ├── axle_bracket_drill_template.scad
-    └── template_instructions.json
-├── instructions.json
-├── LICENSE
-├── main_assembly.scad
-├── plans.json
-├── README.md
-└── tree.txt
+    ├── CAD_designs
+        ├── assemblies
+            ├── caster_wheel_asm - kopie.scad
+            ├── caster_wheel_asm.scad
+            ├── chassis_beam_construct_asm.scad
+            ├── chassis_frame_asm.scad
+            └── wheel_unit_asm.scad
+        ├── config
+            └── parameters.scad
+        ├── exports
+            ├── drill_jigs_3d_print.scad
+            └── nesting_laser_cut.scad
+        ├── imports
+            ├── hubmotor_quinder.stl
+            ├── hubmotor_quinder_ring_left.stl
+            ├── hubmotor_quinder_ring_right.stl
+            ├── notes.txt
+            ├── tire_4.8_4.00-8.stl
+            └── wheelbarrow_wheel_4.8_4.00-8.stl
+        ├── older_models
+            ├── Bruut_OpenAgbot.scad
+            └── Bruut_OpenAgbot_3D_printable.scad
+        ├── parts
+            ├── axle_bracket.scad
+            ├── bracket_side_plate.scad
+            ├── bracket_top_plate.scad
+            ├── caster_wheel_beam.scad
+            ├── caster_wheel_bracket.scad
+            ├── caster_wheel_outer_cilinder.scad
+            ├── caster_wheel_pivot_cilinder.scad
+            ├── chassis_beam_1.scad
+            ├── chassis_beam_2.scad
+            ├── main_base_plate.scad
+            ├── protection_cover.scad
+            └── upright_wall.scad
+        ├── templates
+            ├── stl's
+                └── axle_bracket_drill_template.stl
+            ├── axle_bracket_drill_template.scad
+            └── template_instructions.json
+        ├── instructions.json
+        ├── LICENSE
+        ├── main_assembly.scad
+        ├── plans.json
+        ├── README.md
+        └── tree.txt

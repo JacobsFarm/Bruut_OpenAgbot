@@ -82,10 +82,31 @@ bracket_top_z = arm_height + bracket_thick;
 axle_hex_width = 85;          
 axle_hex_height = 40;
 axle_hex_straight_part = 30;   
-axle_bracket_thickness = 6;    
+axle_bracket_thickness = 5;    
 
 axle_hole_diameter = 10.3; //Dikte van het gaten in de axle_bracket
 axle_hole_distance = 30; //hoogte vanaf de onderkant tot de wiel ophanging
 
 axle_flat_width = axle_dia; // Gebruikt 10.2 uit parameters 
 axle_round_dia = bolt_dia;  // Gebruikt 14.2 uit parameters
+
+// --- Caster Wheel Parameters ---  
+bracket_width            = 80;  
+bracket_thickness        = 5;
+caster_wheel_axle_width  = 130;   
+caster_wheel_axle_diameter = 20;
+bracket_axle_hole_diameter = 10.4;
+
+pivot_cylinder_dia       = 30;  
+pivot_cylinder_height    = 100;  
+
+outer_cylinder_thickness = 5;   
+outer_cylinder_height    = 60;  
+outer_cylinder_z_offset  = 33;   
+kap_speling              = 1;   
+
+tube_width               = 35;  
+tube_thickness           = 2;   
+tube_length              = 400;
+tube_length_min          = 240;
+
