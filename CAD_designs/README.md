@@ -4,7 +4,14 @@ Project for making the Bruut_OpenAgbot
 <img width="2144" height="1984" alt="Gemini_Generated_Image_ldpsodldpsodldps(1)" src="https://github.com/user-attachments/assets/1389b9fb-cad2-454f-907a-6cd15e57a0ce" />
 
 ## openscad project
+Volume 2 ( redesign (better alignments and stronger realistic design  
+<img width="569" height="396" alt="Schermafbeelding 2026-05-24 135552" src="https://github.com/user-attachments/assets/1f2a2c6e-b696-4d34-923b-221b127909f8" />
+<img width="703" height="39<img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/83a66241-c0fa-4606-bfac-83c0442ae7bd"
+<img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/17ac5686-3153-48f9-91bf-126a4f813c2c" />
+<img width="701" height="427" alt="Schermafbeelding 2026-05-24 135643" src="https://github.com/user-attachments/assets/2a41694c-8539-4732-9f56-70f6ef6497fc" />
 
+
+Volume 1
 <img width="453" height="419" alt="Schermafbeelding 2026-01-11 142608" src="https://github.com/user-attachments/assets/36fbeb26-1454-42bb-a0d3-fd1498c2cf6c" />
 <img width="481" height="454" alt="Schermafbeelding 2026-01-11 142623" src="https://github.com/user-attachments/assets/457d1cad-3838-405f-a297-5bf12830db70" />
 <img width="532" height="584" alt="Schermafbeelding 2026-01-11 211400" src="https://github.com/user-attachments/assets/55698d86-1d97-41dc-82bc-6ca43341620f" />
