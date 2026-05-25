@@ -5,19 +5,8 @@ from collections import deque
 from app.services.logger import DriveLogger
 
 # ============================================================
-# NAVIGATOR V3 — Point-and-Shoot (Go-To-Goal) Logica
+# NAVIGATOR V3.1 — Point-and-Shoot met 10Hz Heading Fusion
 # voor skid-steer veldrobot met dual RTK-GPS.
-#
-# Gedrag:
-#   1. Richten: Als neus > 15 graden afwijkt van doel -> 
-#      Stilstaan en om as draaien (tank-turn).
-#   2. Rijden: Als neus goed staat -> Snel vooruit en 
-#      lichtjes bijsturen, wielen vallen niet meer stil.
-#
-# Logging:
-#   De XTE (afwijking van de ideale doellijn) en het 
-#   Look-Ahead punt worden nog wél op de achtergrond berekend
-#   puur voor de logbestanden, maar NIET gebruikt om te sturen!
 # ============================================================
 
 # --- Gecalibreerde motoreigenschappen ---
@@ -47,11 +36,11 @@ class Navigator:
         # ==========================================
         # --- TUNING PARAMETERS ---
         # ==========================================
-        self.kp = 12.0               # Stuurkracht (Point-and-Shoot mag iets hoger staan)
+        self.kp = 12.0               # Stuurkracht
         self.kd = 20.0               # Demping op draaisnelheid (yaw-rate)
         
-        # Logging parameters (worden NIET meer gebruikt voor rijden)
         self.look_ahead_dist = 2.5   
+        self.waypoint_tolerance = 1.5  # Iets ruimer gezet (was 1.0m) voor rustiger gedrag bij het doel
 
         # Snelheid: PI Cruise Control
         self.kp_snelheid = 400.0
@@ -69,6 +58,11 @@ class Navigator:
         self._vorige_heading  = None   
         self._vorige_fout     = 0.0
         self._vorige_tijd     = None
+
+        # Hulpvariabelen voor 1Hz en 10Hz fusie
+        self._last_raw_heading = None
+        self._estimated_heading = 0.0
+        self._last_gps_bearing = None
 
     def start(self, waypoints, target_speed_kmh=3.0):
         self.logger.start_nieuwe_rit()
@@ -93,6 +87,9 @@ class Navigator:
         self._speed_integraal = 0.0
         self._vorige_heading  = None
         self._heading_buffer.clear()
+        self._last_raw_heading = None
+        self._estimated_heading = 0.0
+        self._last_gps_bearing = None
 
     # --- Wiskunde hulpfuncties ---
     @staticmethod
@@ -128,10 +125,12 @@ class Navigator:
         return (a - b + 180) % 360 - 180
 
     def _gefilterde_heading(self) -> float:
-        raw = self.gps.current_heading
-        if raw == 0.0: return 0.0
-        if len(self._heading_buffer) == 0 or self._heading_buffer[-1] != raw:
-            self._heading_buffer.append(raw)
+        if self._estimated_heading == 0.0: 
+            return 0.0
+        
+        # Voeg de vloeiende 10 Hz waarde toe aan de buffer voor lichte filtering
+        self._heading_buffer.append(self._estimated_heading)
+        
         rads = [math.radians(h) for h in self._heading_buffer]
         sin_gem = sum(math.sin(r) for r in rads) / len(rads)
         cos_gem = sum(math.cos(r) for r in rads) / len(rads)
@@ -188,15 +187,37 @@ class Navigator:
             now = time.time()
             dt = 0.1 if self._vorige_tijd is None else max(0.01, min(now - self._vorige_tijd, 0.5))
 
+            # ── HEADING FUSIE (1Hz + 10Hz) ──
+            raw_heading = self.gps.current_heading
+            new_heading_received = False
+            
+            # Detecteer een daadwerkelijke nieuwe 1 Hz update van de gekalibreerde kaart
+            if raw_heading != 0.0 and raw_heading != self._last_raw_heading:
+                self._last_raw_heading = raw_heading
+                self._estimated_heading = raw_heading
+                new_heading_received = True
+
             if self._vorige_actuele_positie is not None:
                 verplaatsing = self._haversine(self._vorige_actuele_positie["lat"], self._vorige_actuele_positie["lon"], curr["lat"], curr["lon"])
                 self._gefilterde_snelheid_mps = (0.2 * (verplaatsing / dt)) + (0.8 * self._gefilterde_snelheid_mps)
+                
+                # Vul de gaten tussen de 1 Hz data op met 10 Hz GPS-interpolatie (Dead Reckoning)
+                if verplaatsing > 0.01:  # Alleen bij betrouwbare beweging (> 1 cm)
+                    current_gps_bearing = self._bearing(self._vorige_actuele_positie["lat"], self._vorige_actuele_positie["lon"], curr["lat"], curr["lon"])
+                    
+                    # Als er géén nieuwe 1 Hz update is, koersen we door op basis van de 10 Hz kaartverplaatsing
+                    if not new_heading_received and self._last_gps_bearing is not None:
+                        bearing_delta = self._angle_diff(current_gps_bearing, self._last_gps_bearing)
+                        self._estimated_heading = (self._estimated_heading + bearing_delta) % 360
+                        
+                    self._last_gps_bearing = current_gps_bearing
+            
             self._vorige_actuele_positie = dict(curr)
 
             # ── Waypoint bereikt? ──
             dist_to_target = self._haversine(curr["lat"], curr["lon"], target["lat"], target["lon"])
-            if dist_to_target < 1.0:
-                print(f"[NAVIGATOR] Waypoint {wp_idx} bereikt.")
+            if dist_to_target < self.waypoint_tolerance:
+                print(f"[NAVIGATOR] Waypoint {wp_idx} bereikt (binnen {self.waypoint_tolerance}m).")
                 prev_wp = dict(target)
                 wp_idx += 1
                 self._vorige_fout    = 0.0
@@ -205,13 +226,13 @@ class Navigator:
                 self._speed_integraal = 0.0
                 continue
 
-            # ── Heading ophalen ──
+            # ── Heading ophalen (Nu responsief op 10 Hz) ──
             current_heading = self._gefilterde_heading()
             if current_heading == 0.0:
                 self._huidige_links  = self._smooth_dac(self._huidige_links,  DAC_RUST)
                 self._huidige_rechts = self._smooth_dac(self._huidige_rechts, DAC_RUST)
                 self.motor.stuur_motoren(self._huidige_links, self._huidige_rechts)
-                time.sleep(0.5)
+                time.sleep(0.1)  # Verlaagd naar 0.1 voor snellere herstart na GPS drop
                 continue
 
             # ── ACHTERGROND: XTE & Look-Ahead berekenen puur voor log ──
@@ -231,7 +252,7 @@ class Navigator:
             # POINT AND SHOOT STATE MACHINE
             # ==========================================================
             if abs(fout) > 80.0:
-                # FASE 1: RICHTEN (Meer dan 15 graden afwijking -> stop met rijden, draai om de as)
+                # FASE 1: RICHTEN (Grote afwijking -> tank-turn om as)
                 turn = (self.kp * 1.5 * fout) - (self.kd * yaw_rate)
                 turn = max(-600, min(600, turn))
                 
@@ -239,12 +260,12 @@ class Navigator:
                 doel_rechts = int(DAC_RUST - turn)
                 
                 pi_correctie = 0.0
-                huidige_fase_kmh = 0.0 # We staan stil qua vooruit rijden
+                huidige_fase_kmh = 0.0 
                 
             else:
-                # FASE 2: RIJDEN (We wijzen de goede kant op -> gas erop en koers houden)
+                # FASE 2: RIJDEN (Goede koers -> rijden en zacht bijsturen)
                 turn = (self.kp * fout) - (self.kd * yaw_rate)
-                turn = max(-250, min(250, turn)) # Zachtere correctie tijdens rijden
+                turn = max(-250, min(250, turn)) 
                 
                 doel_snelheid_mps = self.doel_snelheid_kmh / 3.6
                 basis_dac = speed_mps_to_dac(doel_snelheid_mps)
@@ -281,7 +302,7 @@ class Navigator:
 
             self.motor.stuur_motoren(self._huidige_links, self._huidige_rechts)
 
-            # ── 6. LOGGING (Alle kolommen netjes gevuld) ──
+            # ── LOGGING ──
             actuele_kmh = self._gefilterde_snelheid_mps * 3.6
             
             self.logger.log_regel(
@@ -293,7 +314,7 @@ class Navigator:
                 heading=current_heading,
                 doel_heading=direct_target_bearing,
                 fout=fout,
-                xte=xte,                          # Opgeslagen puur voor analyse
+                xte=xte,                          
                 doel_kmh=huidige_fase_kmh,
                 echt_kmh=actuele_kmh,
                 turn=turn,
@@ -303,8 +324,8 @@ class Navigator:
                 rechts=self._huidige_rechts,
                 dist=dist_to_target,
                 dt=dt,
-                lookahead_lat=lookahead_lat,      # Opgeslagen puur voor analyse
-                lookahead_lon=lookahead_lon       # Opgeslagen puur voor analyse
+                lookahead_lat=lookahead_lat,      
+                lookahead_lon=lookahead_lon       
             )
 
             print(
