@@ -79,13 +79,13 @@ bracket_total_width = inner_width + (extra_space_bracket*2) + (2 * bracket_thick
 bracket_top_z = arm_height + bracket_thick;
 
 // Axle bracket
-axle_hex_width = 85;          
+axle_hex_width = 110;          
 axle_hex_height = 40;
 axle_hex_straight_part = 30;   
 axle_bracket_thickness = 5;    
 
 axle_hole_diameter = 10.3; //Dikte van het gaten in de axle_bracket
-axle_hole_distance = 30; //hoogte vanaf de onderkant tot de wiel ophanging
+axle_hole_distance = 40; //hoogte vanaf de onderkant tot de wiel ophanging
 
 axle_flat_width = axle_dia; // Gebruikt 10.2 uit parameters 
 axle_round_dia = bolt_dia;  // Gebruikt 14.2 uit parameters
