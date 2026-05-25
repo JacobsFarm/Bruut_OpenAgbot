@@ -1,1 +1,4 @@
 In this directory can you place yout STL files for importing them into your designs
+
+The used STL models can be retrieved from the importer of yout hubmotor, i use Quinder 48v hubmotors
+The used STL models for the casterwheels are from a wheelbarrow wheel and can be downloaded from the next link https://grabcad.com/library/wheelbarrow-wheel-4-80-4-00-8-1 
