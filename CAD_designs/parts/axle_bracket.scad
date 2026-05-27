@@ -1,6 +1,17 @@
 include <../config/parameters.scad>
 
-axle_bracket_part();
+// Zet deze op 'true' voor de platte DXF-vorm
+export_als_dxf = true;
+
+if (export_als_dxf) {
+    // 2D DXF weergave
+    projection(cut = false) 
+        rotate([0, 90, 0])
+            axle_bracket_part();
+} else {
+    // 3D weergave
+    axle_bracket_part();
+}
 
 module axle_bracket_part() {
     $fn = 100;
