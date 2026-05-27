@@ -1,5 +1,16 @@
 include <../config/parameters.scad>
 
+export_als_dxf = false;
+
+if (export_als_dxf) {
+    // 2D DXF weergave
+    projection(cut = false) 
+            bracket_top_plate();
+} else {
+    // 3D weergave
+    bracket_top_plate();
+}
+
 module bracket_top_plate() {
     difference() {
         // Basisplaat
@@ -19,6 +30,3 @@ module bracket_top_plate() {
         }
     }
 }
-
-// Preview
-bracket_top_plate();
