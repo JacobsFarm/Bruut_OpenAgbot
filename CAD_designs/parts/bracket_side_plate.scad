@@ -1,6 +1,16 @@
 include <../config/parameters.scad>
 
-bracket_side_plate(show_bend = false, bend_angle = 90);
+// Zet deze op 'true' om het model plat te leggen voor DXF export
+export_als_dxf = false; 
+
+if (export_als_dxf) {
+    projection(cut = false) 
+        rotate([0, 90, 0]) 
+            bracket_side_plate(show_bend = false, bend_angle = 90);
+} else {
+    // 3D weergave (nu bij 'false')
+    bracket_side_plate(show_bend = false, bend_angle = 90);
+}
 
 module bracket_side_plate(show_bend = true, bend_angle = 90) {
     h_total = arm_height + axle_bottom_dist;
