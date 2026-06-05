@@ -9,8 +9,8 @@ with open('data/config.json', 'r') as f:
 # Start de hardware controllers als globale objecten (Singletons)
 # Zodra de applicatie start, maken deze direct verbinding met de /dev/ttyACM* poorten
 motor_controller = MotorController(
-    port=config['hardware']['arduino_port'], 
-    baudrate=config['hardware']['arduino_baudrate']
+    port=config['hardware'].get('arduino_dac_port', '/dev/ttyACM2'), 
+    baudrate=config['hardware'].get('arduino_dac_baudrate', 115200)
 )
 
 gps_system = GpsSystem(config)

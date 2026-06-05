@@ -1,174 +1,159 @@
 <script>
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
 
-    // --- STATE VARIABELEN ---
-    let isGekoppeld = true; // Standaard op gekoppeld (net als in V5)
-    
-    // Gekoppelde waarden
-    let gas = 700;      // 700 - 3100
-    let stuur = 0;      // -100 - 100
+    // --- KALIBRATIE STATE ---
+    let stuurVast = true;
+    let stuurStatus = "Vast (Enabled)";
 
-    // Individuele DAC waarden
-    let links = 700;
-    let rechts = 700;
+    // --- SLIDER STATE ---
+    let stuurRichting = 0.0; // -1.0 (links) tot 1.0 (rechts)
+    let snelheid = 0.0;      // 0.0 tot 5.0 km/h
 
-    // --- REKENFUNCTIES ---
-    // Bereken het voltage voor weergave (zoals in DAC_test_versie_V5.py)
-    $: voltLinks = (0.77 + ((links - 700) * (3.4 - 0.77) / (3100 - 700))).toFixed(2);
-    $: voltRechts = (0.77 + ((rechts - 700) * (3.4 - 0.77) / (3100 - 700))).toFixed(2);
+    // --- ANTI-SPAM GEHEUGEN ---
+    let vorigeRichting = null;
+    let vorigeSnelheid = null;
 
-    // De mix-logica (Gas + Sturen -> Links & Rechts)
-    function updateGekoppeld() {
-        if (!isGekoppeld) return;
+    let intervalId;
 
-        let actief_gas = gas - 700;
-        
-        if (stuur < 0) { // Naar links
-            let factor = 1.0 - (Math.abs(stuur) / 100.0);
-            links = 700 + Math.round(actief_gas * factor);
-            rechts = gas;
-        } else if (stuur > 0) { // Naar rechts
-            let factor = 1.0 - (stuur / 100.0);
-            links = gas;
-            rechts = 700 + Math.round(actief_gas * factor);
-        } else { // Rechtdoor
-            links = gas;
-            rechts = gas;
+    // --- HARDWARE KALIBRATIE ---
+    async function toggleStuur() {
+        stuurVast = !stuurVast;
+        try {
+            await fetch('/api/steering/enable', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enable: stuurVast })
+            });
+            stuurStatus = stuurVast ? "Vast (Enabled)" : "VRIJ (Kan met de hand draaien)";
+        } catch(e) { console.error(e); }
+    }
+
+    async function setZeroPoint() {
+        if (!confirm("Weet je zeker dat het wiel nu EXACT recht staat? Dit wordt het nieuwe nulpunt.")) return;
+        try {
+            await fetch('/api/steering/zero', { method: 'POST' });
+            alert("Nulpunt gekalibreerd!");
+        } catch(e) { console.error(e); }
+    }
+
+    // --- ZEND LOOP (10Hz) ---
+    async function stuurNaarBackend() {
+        // ANTI-SPAM: Check of er wel écht iets is veranderd sinds de vorige check!
+        if (stuurRichting === vorigeRichting && snelheid === vorigeSnelheid) {
+            return; // Zo niet? Doe dan lekker niks en stop met spammen!
         }
-        
-        stuurMotor();
+
+        // Sla de nieuwe waarden op in het geheugen
+        vorigeRichting = stuurRichting;
+        vorigeSnelheid = snelheid;
+
+        try {
+            await fetch('/api/nav/joystick', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    x: parseFloat(stuurRichting),
+                    y: snelheid > 0 ? 1.0 : 0.0,
+                    target_speed_kmh: parseFloat(snelheid)
+                })
+            });
+        } catch(e) { console.error("RC Error", e); }
     }
 
-    // --- API COMMUNICATIE ---
-    async function stuurMotor() {
-        await fetch('/api/motor', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ links: parseInt(links), rechts: parseInt(rechts) })
-        });
-    }
-
-    async function noodStop() {
-        gas = 700;
-        stuur = 0;
-        links = 700;
-        rechts = 700;
+    async function forceNoodstop() {
+        snelheid = 0.0;
+        stuurRichting = 0.0;
         await fetch('/api/stop', { method: 'POST' });
+        
+        // Forceer het opslaan door het geheugen even leeg te gooien
+        vorigeSnelheid = null; 
+        stuurNaarBackend(); 
     }
 
-    // --- TOETSENBORD LOGICA ---
-    function handleKeydown(event) {
-        // Voorkom dat het hele scherm scrollt als we pijltjes/spatie gebruiken
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Enter'].includes(event.key)) {
-            event.preventDefault(); 
-        }
-
-        // Enter is ALTIJD Noodstop
-        if (event.key === 'Enter') {
-            noodStop();
-            return;
-        }
-
-        // Overige toetsen werken alleen in gekoppelde modus
-        if (!isGekoppeld) return;
-
-        switch(event.key) {
-            case 'ArrowUp':
-                gas = Math.min(3100, gas + 50);
-                updateGekoppeld();
-                break;
-            case 'ArrowDown':
-                gas = Math.max(700, gas - 50);
-                updateGekoppeld();
-                break;
-            case 'ArrowLeft':
-                stuur = Math.max(-100, stuur - 10);
-                updateGekoppeld();
-                break;
-            case 'ArrowRight':
-                stuur = Math.min(100, stuur + 10);
-                updateGekoppeld();
-                break;
-            case ' ': // Spatie = Stuur centreren
-                stuur = 0;
-                updateGekoppeld();
-                break;
-        }
+    function resetStuur() {
+        stuurRichting = 0.0;
     }
+
+    onMount(() => {
+        // Start zendloop: checkt 10x per seconde (100ms) OF er iets is veranderd
+        intervalId = setInterval(() => {
+            stuurNaarBackend();
+        }, 100);
+
+        return () => clearInterval(intervalId);
+    });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<div class="motor-pane">
+    <button class="noodstop" on:click={forceNoodstop}>🛑 NOODSTOP 🛑</button>
 
-<div class="motor-dashboard">
-    <h2>Besturing (Muis & Toetsenbord)</h2>
-    
-    <button class="noodstop" on:click={noodStop}>
-        🔴 NOODSTOP / Alles naar 0 (Druk op ENTER)
-    </button>
-
-    <div class="schakelaar-container">
-        <label class="switch">
-            <input type="checkbox" bind:checked={isGekoppeld} on:change={() => { if(isGekoppeld) updateGekoppeld(); }}>
-            <span class="slider round"></span>
-        </label>
-        <span class="modus-text">
-            {isGekoppeld ? "🟢 Gekoppelde Besturing (Gas/Stuur + Pijltjestoetsen)" : "⚪ Handmatige Besturing (Wielen apart)"}
-        </span>
+    <div class="kalibratie-box">
+        <h3>Stuur Kalibratie (Stappenmotor)</h3>
+        <p>Status: <strong>{stuurStatus}</strong></p>
+        <div class="btn-group">
+            <button class="btn-toggle" on:click={toggleStuur}>
+                {stuurVast ? "🔓 Vrijzetten (Handmatig)" : "🔒 Vastzetten (Motor)"}
+            </button>
+            <button class="btn-zero" on:click={setZeroPoint}>📍 Huidige Positie = 0° (Rechtuit)</button>
+        </div>
     </div>
 
-    <hr>
+    <div class="slider-box">
+        <h3>Handmatige Besturing</h3>
 
-    <div class="pane {isGekoppeld ? 'active-pane' : 'disabled-pane'}">
-        <h3>Hoofdgas (Pijltje Omhoog / Omlaag)</h3>
-        <input type="range" min="700" max="3100" class="gas-slider"
-               bind:value={gas} on:input={updateGekoppeld} disabled={!isGekoppeld}>
-        
-        <h3>Sturen (Pijltjes L/R) - Spatie is Rechtdoor</h3>
-        <input type="range" min="-100" max="100" class="stuur-slider"
-               bind:value={stuur} on:input={updateGekoppeld} disabled={!isGekoppeld}>
-    </div>
+        <div class="slider-container">
+            <label class="slider-label" for="snelheid-slider">Snelheid: {snelheid.toFixed(1)} km/h</label>
+            <input id="snelheid-slider" type="range" min="0" max="5.0" step="0.1" bind:value={snelheid} class="speed-slider">
+        </div>
 
-    <hr>
-
-    <div class="pane {!isGekoppeld ? 'active-pane' : 'disabled-pane'}">
-        <h3>Linker Wiel</h3>
-        <p>DAC: <strong>{links}</strong> | Voltage: <strong>~{voltLinks}V</strong></p>
-        <input type="range" min="700" max="3100" 
-               bind:value={links} on:input={stuurMotor} disabled={isGekoppeld}>
-
-        <h3>Rechter Wiel</h3>
-        <p>DAC: <strong>{rechts}</strong> | Voltage: <strong>~{voltRechts}V</strong></p>
-        <input type="range" min="700" max="3100" 
-               bind:value={rechts} on:input={stuurMotor} disabled={isGekoppeld}>
+        <div class="slider-container">
+            <label class="slider-label" for="richting-slider">
+                Richting: {stuurRichting > 0 ? "Rechts" : stuurRichting < 0 ? "Links" : "Rechtuit"} 
+                ({(Math.abs(stuurRichting) * 100).toFixed(0)}%)
+            </label>
+            <input id="richting-slider" type="range" min="-1.0" max="1.0" step="0.05" bind:value={stuurRichting} class="steer-slider">
+            <button class="btn-center" on:click={resetStuur}>⬇️ Zet Stuur Midden</button>
+        </div>
     </div>
 </div>
 
 <style>
-    .motor-dashboard { background: #1e1e1e; color: white; padding: 20px; border-radius: 8px; }
-    
-    .noodstop { 
-        background: #d32f2f; color: white; padding: 20px; width: 100%; 
-        font-size: 1.2em; font-weight: bold; border: none; border-radius: 5px; 
+    .motor-pane { padding: 10px; color: #fff; background: #1a1a1a; border-radius: 8px; }
+
+    .noodstop {
+        background: #f44336; color: white; padding: 20px; width: 100%;
+        font-size: 1.5em; font-weight: bold; border: none; border-radius: 5px;
         cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     .noodstop:active { background: #b71c1c; transform: translateY(2px); }
 
-    .pane { padding: 15px; border-radius: 5px; background: #2a2a2a; margin-bottom: 15px; transition: opacity 0.3s; }
-    .active-pane { border: 2px solid #4CAF50; opacity: 1; }
-    .disabled-pane { opacity: 0.4; pointer-events: none; }
+    .kalibratie-box { background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+    .btn-toggle { background: #ff9800; color: white; padding: 15px; border: none; border-radius: 4px; font-weight: bold; font-size: 1.1em; }
+    .btn-zero { background: #03a9f4; color: white; padding: 15px; border: none; border-radius: 4px; font-weight: bold; font-size: 1.1em; }
 
-    input[type=range] { width: 100%; height: 35px; margin-bottom: 15px; cursor: pointer;}
-    .gas-slider { accent-color: #4CAF50; }
-    .stuur-slider { accent-color: #ff9800; }
+    .slider-box { background: #2a2a2a; padding: 15px; border-radius: 8px; text-align: center; }
 
-    /* Custom Switch CSS */
-    .schakelaar-container { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; font-weight: bold;}
-    .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; }
-    .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; }
-    input:checked + .slider { background-color: #4CAF50; }
-    input:checked + .slider:before { transform: translateX(26px); }
-    .slider.round { border-radius: 34px; }
-    .slider.round:before { border-radius: 50%; }
+    .slider-container { margin-bottom: 30px; background: #333; padding: 15px; border-radius: 8px; }
+    .slider-label { display: block; margin-bottom: 15px; font-size: 1.2em; font-weight: bold; }
+
+    /* Extra grote sliders voor gebruik op de telefoon/tablet */
+    input[type="range"] {
+        width: 100%; height: 45px;
+        background: #444;
+        border-radius: 20px;
+        outline: none;
+        cursor: pointer;
+        margin-bottom: 15px;
+    }
+
+    .speed-slider { accent-color: #4CAF50; }
+    .steer-slider { accent-color: #2196F3; }
+
+    .btn-center { 
+        background: #555; color: white; padding: 12px; border: none; 
+        border-radius: 4px; font-weight: bold; cursor: pointer; 
+        width: 100%; font-size: 1.1em; margin-top: 5px;
+    }
+    .btn-center:active { background: #777; }
 </style>

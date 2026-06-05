@@ -10,33 +10,29 @@ class DriveLogger:
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir, exist_ok=True)
 
-    def start_nieuwe_rit(self):
+    def start_nieuwe_rit(self, navigatie_modus="onbekend"):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(self.log_dir, f"rit_{timestamp}.csv")
+        self.log_file = os.path.join(self.log_dir, f"rit_{navigatie_modus}_{timestamp}.csv")
         
         try:
             with open(self.log_file, mode='w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
-                    "Tijdstip", "WP_Doel", "Lat", "Lon", 
-                    "Fix", "HDOP",
-                    "Heading", "Doel_Heading", "Fout_Graden", "XTE_Meters", 
+                    "Tijdstip", "WP_Doel", "Modus",
+                    "Lat", "Lon", "Fix", "HDOP",
+                    "Heading_Echt", "Heading_Doel", "Heading_Fout", 
+                    "Stuurhoek_Graden", 
                     "Snelheid_Doel_kmh", "Snelheid_Echt_kmh",
-                    "Ruwe_Turn", "Ruwe_PI_Corr", "PI_Integraal",
-                    "DAC_Links", "DAC_Rechts", "Afstand_tot_WP", 
-                    "Delta_Tijd_Sec",
-                    "Lookahead_Lat", "Lookahead_Lon" # <-- NIEUWE KOLOMMEN
+                    "DAC_Links", "DAC_Rechts", # <-- Nu weer mooi opgesplitst
+                    "Afstand_tot_WP_m", "Lookahead_Slider_m", "Loop_Tijd_s"
                 ])
-            print(f"[LOGGER] Nieuwe rit gestart (met Look-Ahead data): {self.log_file}")
-        except Exception as e:
-            print(f"[LOGGER ERROR] Kan logbestand niet aanmaken: {e}")
+        except Exception:
             self.log_file = None
 
-    def log_regel(self, wp_idx, lat, lon, fix, hdop, heading, doel_heading, 
-                  fout, xte, doel_kmh, echt_kmh, turn, pi_corr, i_term, 
-                  links, rechts, dist, dt, lookahead_lat, lookahead_lon): # <-- NIEUWE ARGUMENTEN
-        if not self.log_file:
-            return
+    def log_regel(self, wp_idx, modus, lat, lon, fix, hdop, heading_echt, heading_doel, 
+                  heading_fout, stuurhoek, doel_kmh, echt_kmh, dac_links, dac_rechts, dist_wp, 
+                  lookahead, dt):
+        if not self.log_file: return
 
         try:
             with open(self.log_file, mode='a', newline='') as file:
@@ -44,15 +40,11 @@ class DriveLogger:
                 tijdstip_nu = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 
                 writer.writerow([
-                    tijdstip_nu, wp_idx, lat, lon, 
-                    fix, hdop, 
-                    round(heading, 2), round(doel_heading, 2), 
-                    round(fout, 2), round(xte, 3), 
-                    round(doel_kmh, 2), round(echt_kmh, 2),
-                    round(turn, 1), round(pi_corr, 1), round(i_term, 3),
-                    links, rechts, round(dist, 2), 
-                    round(dt, 3),
-                    lookahead_lat, lookahead_lon # <-- NIEUWE DATA OPSLAAN
+                    tijdstip_nu, wp_idx, modus, lat, lon, fix, hdop, 
+                    round(heading_echt, 2), round(heading_doel, 2), round(heading_fout, 2), 
+                    round(stuurhoek, 2), round(doel_kmh, 2), round(echt_kmh, 2),
+                    dac_links, dac_rechts, # <-- Beide DAC waarden wegschrijven
+                    round(dist_wp, 3), round(lookahead, 3), round(dt, 3)
                 ])
         except Exception:
             pass

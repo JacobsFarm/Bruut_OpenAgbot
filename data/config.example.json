@@ -1,13 +1,19 @@
 {
   "system": {
-    "os": "windows"
+    "os": "linux" 
   },
   "hardware": {
-    "gps_port": "/dev/ttyACM1", // COM2 for windows
-    "gps_heading_port": "/dev/ttyACM0", // COM3 for windows
+    "gps_port": "/dev/ttyACM1",
+    "gps_heading_port": "/dev/ttyACM0",
     "gps_baudrate": 115200, 
-    "arduino_port": "/dev/ttyACM2", // COM4 for windows
-    "arduino_baudrate": 115200
+    "arduino_dac_port": "/dev/ttyACM2", 
+    "arduino_dac_baudrate": 115200,
+    "arduino_stepper_port": "/dev/ttyACM3", 
+    "arduino_stepper_baudrate": 9600
+  },
+  "steering": {
+    "max_angle_degrees": 45.0,
+    "invert_direction": false
   },
   "ntrip": {
     "host": "caster.centipede.fr",

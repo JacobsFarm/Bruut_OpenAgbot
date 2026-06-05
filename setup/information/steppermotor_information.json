@@ -1,0 +1,28 @@
+{
+  "test_setup": {
+    "power_supply": {
+      "voltage": "48V DC"
+    },
+    "stepper_configuration": {
+      "motor_type": "NEMA 34 stepper motor",
+      "driver_model": "HBS86H",
+      "microsteps_per_revolution": 3200,
+      "dipswitch_settings": {
+        "sw1": "off",
+        "sw2": "off",
+        "sw3": "on",
+        "sw4": "on"
+      },
+      "gearbox_ratio": "5:1",
+      "step_delay_us": 100
+    },
+    "arduino_r4_minima_connections": {
+      "serial_communication_baudrate": 9600,
+      "pin_mapping": {
+        "pul_plus": 5,
+        "dir_plus": 6,
+        "ena_plus": 7
+      }
+    }
+  }
+}
