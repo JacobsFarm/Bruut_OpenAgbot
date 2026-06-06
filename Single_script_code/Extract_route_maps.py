@@ -4,30 +4,17 @@ import math
 import folium
 import matplotlib.pyplot as plt
 
-# ==========================================
-# CONFIGURATIE
-# ==========================================
-# --- SLIMME PADEN ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 LOG_DIR = os.path.join(PROJECT_ROOT, "data", "logs")
 
-# ------------------------------------------
-# KIES JE MODUS & FORMAAT
-# ------------------------------------------
-# Zet op True om de hele map uit te lezen, of False voor één bestand
 VERWERK_HELE_MAP = True
 BESTANDSNAAM = "rit_2_20_05_2026.csv"
 
-# --- STATISCHE MAP INSTELLINGEN ---
-# Kies hieronder hoe je de statische afbeelding wilt opslaan: 'jpg', 'pdf' of 'png'
 BESTANDSFORMAAT = 'jpg'
 BUFFER_MARGE = 0.0002 
-# ==========================================
-
 
 def genereer_html_kaart(csv_pad, output_pad):
-    """Genereert de interactieve HTML kaart met Folium."""
     latitudes = []
     longitudes = []
     route_punten = []
@@ -45,7 +32,7 @@ def genereer_html_kaart(csv_pad, output_pad):
                 latitudes.append(lat)
                 longitudes.append(lon)
                 route_punten.append(row)
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 pass
 
     if not route_punten:
@@ -79,7 +66,7 @@ def genereer_html_kaart(csv_pad, output_pad):
                 kleur = "orange"   
             else:
                 kleur = "green"    
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, TypeError):
             kleur = "gray"
             
         hover_html = f'''
@@ -115,9 +102,7 @@ def genereer_html_kaart(csv_pad, output_pad):
     m.save(output_pad)
     print(f"✅ HTML opgeslagen: '{os.path.basename(output_pad)}'")
 
-
 def genereer_statische_kaart(csv_pad, output_pad):
-    """Genereert de statische afbeelding (JPG/PDF) met Matplotlib."""
     lats = []
     lons = []
     colors = []
@@ -143,7 +128,7 @@ def genereer_statische_kaart(csv_pad, output_pad):
                     
                 lats.append(lat)
                 lons.append(lon)
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 pass
 
     if not lats:
@@ -181,9 +166,7 @@ def genereer_statische_kaart(csv_pad, output_pad):
     plt.close()
     print(f"✅ Afbeelding opgeslagen: '{os.path.basename(output_pad)}'")
 
-
 def verwerk_bestand(csv_pad):
-    """Verwerkt één CSV bestand en roept beide generatoren aan."""
     bestand_kort = os.path.basename(csv_pad)
     if not os.path.exists(csv_pad):
         print(f"❌ Fout: Bestand '{csv_pad}' niet gevonden!")
@@ -198,7 +181,6 @@ def verwerk_bestand(csv_pad):
     genereer_html_kaart(csv_pad, output_html)
     genereer_statische_kaart(csv_pad, output_img)
     print("-" * 40)
-
 
 if __name__ == "__main__":
     if VERWERK_HELE_MAP:

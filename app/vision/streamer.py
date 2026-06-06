@@ -8,7 +8,7 @@ from ultralytics import YOLO
 # Importeer de nieuwe modules
 from app.vision.detection_logger import DetectionLogger
 from app.vision.weed_tracker import WeedTracker
-from app.hardware import gps_system
+from app import gps_system
 
 class VisionStreamer:
     def __init__(self, config):

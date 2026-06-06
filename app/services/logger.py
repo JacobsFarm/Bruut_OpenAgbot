@@ -24,15 +24,14 @@ class DriveLogger:
                     "DAC_Links", "DAC_Rechts",
                     "Afstand_tot_WP_m", "Lookahead_m", "Loop_Tijd_s"
                 ])
-        except Exception as e:
-            print(f"[LOGGER] Fout bij aanmaken logbestand: {e}")
+        except Exception:
             self.log_file = None
 
-    def log_regel(self, wp_idx, modus, lat, lon, fix, hdop,
-                  heading_echt, heading_doel, heading_fout,
-                  stuurhoek, doel_kmh, echt_kmh,
-                  dac_links, dac_rechts,
-                  dist_wp, lookahead, dt):
+    def log_regel(self, modus="", wp_idx=0, lat=0.0, lon=0.0, fix=0, hdop=99.0,
+                  heading_echt=0.0, heading_doel=0.0, heading_fout=0.0,
+                  stuurhoek=0.0, doel_kmh=0.0, echt_kmh=0.0,
+                  dac_links=0, dac_rechts=0,
+                  dist_wp=0.0, lookahead=0.0, dt=0.0):
         if not self.log_file:
             return
 
@@ -42,24 +41,28 @@ class DriveLogger:
                 tijdstip_nu = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 writer.writerow([
                     tijdstip_nu, modus, wp_idx, lat, lon, fix, hdop,
-                    round(heading_echt, 2), round(heading_doel, 2), round(heading_fout, 2),
-                    round(stuurhoek, 2), round(doel_kmh, 2), round(echt_kmh, 2),
-                    dac_links, dac_rechts,
-                    round(dist_wp, 3), round(lookahead, 2), round(dt, 4)
+                    round(heading_echt, 2) if heading_echt else 0.0, 
+                    round(heading_doel, 2) if heading_doel else 0.0, 
+                    round(heading_fout, 2) if heading_fout else 0.0,
+                    round(stuurhoek, 2) if stuurhoek else 0.0, 
+                    round(doel_kmh, 2) if doel_kmh else 0.0, 
+                    round(echt_kmh, 2) if echt_kmh else 0.0,
+                    int(dac_links) if dac_links else 0, 
+                    int(dac_rechts) if dac_rechts else 0,
+                    round(dist_wp, 3) if dist_wp else 0.0, 
+                    round(lookahead, 2) if lookahead else 0.0, 
+                    round(dt, 4) if dt else 0.0
                 ])
         except Exception:
             pass
 
     def stop_log(self):
-        """Voegt een duidelijke eindmarkering toe aan het afgeronde logbestand."""
         if not self.log_file:
             return
         try:
             with open(self.log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(["---", "EINDE ROUTE", "---"])
-            print(f"[LOGGER] Log succesvol afgesloten: {self.log_file}")
-        except Exception as e:
-            print(f"[LOGGER] Fout bij sluiten logbestand: {e}")
-        finally:
-            self.log_file = None
+                writer.writerow(["---", "EINDE RIT", "---"])
+        except Exception:
+            pass
+        self.log_file = None

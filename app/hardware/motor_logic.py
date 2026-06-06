@@ -33,7 +33,7 @@ class MotorController:
             if dwing_verzenden or (huidige_tijd - self.laatste_zend_tijd) >= self.vertraging:
                 if self.arduino and self.arduino.is_open:
                     commando = f"{dac_links},{dac_rechts}\n"
-                    print(f"🤖 [ARDUINO] Ik stuur: {commando.strip()}") # <-- VOEG DEZE TOE
+                    # print(f"🤖 [ARDUINO] Ik stuur: {commando.strip()}") # <-- VOEG DEZE TOE
                     self.arduino.write(commando.encode('utf-8'))
                     self.laatste_zend_tijd = huidige_tijd
                 else:

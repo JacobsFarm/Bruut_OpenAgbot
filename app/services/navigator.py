@@ -2,248 +2,196 @@ import math
 import time
 import threading
 import logging
-from app.services.logger import DriveLogger
 
-DAC_MIN   = 1200    
-DAC_MAX   = 3100    
-DAC_RUST  = 700     
-_DAC_SLOPE     = 1000.0   
-_DAC_INTERCEPT = 0.96     
-
-# Aankomstdrempel voor het LAATSTE waypoint (robot stopt hier volledig)
-AANKOMST_DREMPEL_EINDE = 0.6   # meter
-# Aankomstdrempel voor tussenliggende waypoints
-AANKOMST_DREMPEL_TUSSEN = 0.6  # meter  — pas aan indien gewenst
-
-
-def speed_mps_to_dac(speed_mps: float) -> int:
-    if speed_mps <= 0.0:
-        return DAC_RUST
-    dac = (speed_mps + _DAC_INTERCEPT) * _DAC_SLOPE
-    return int(max(DAC_MIN, min(DAC_MAX, dac)))
-
+# Optioneel: Importeer je bestaande logger als je die nog gebruikt voor analyse
+try:
+    from app.services.logger import DriveLogger
+except ImportError:
+    DriveLogger = None
 
 class Navigator:
-    def __init__(self, gps_sys, motor_ctrl, stuur_ctrl):
-        self.gps = gps_sys
-        self.motor = motor_ctrl
-        self.stuur = stuur_ctrl
-        self.logger = DriveLogger()
+    """
+    De 'Routeplanner en Chauffeur' van de AgBot.
+    Volgt een lijst met GPS-waypoints via het Pure Pursuit algoritme.
+    Geheel onafhankelijk van hardware-specifieke (DAC) logica.
+    """
+    def __init__(self, gps_system, vehicle_controller, config):
+        self.logger = logging.getLogger(__name__)
+        if DriveLogger:
+            self.drive_logger = DriveLogger()
+        else:
+            self.drive_logger = None
         
+        # Geïnjecteerde modules
+        self.gps = gps_system
+        self.vehicle = vehicle_controller
+        
+        # Voertuig & Stuur parameters
+        self.wheelbase = config.get("vehicle", {}).get("wheelbase_m", 1.2)
+        steering_config = config.get("steering", {})
+        self.max_angle = steering_config.get("max_angle_degrees", 45.0)
+        
+        # Pure Pursuit & Navigatie instellingen
+        nav_config = config.get("navigation", {})
+        self.lookahead_distance = nav_config.get("lookahead_distance_m", 2.0)
+        self.arrival_threshold_inter = nav_config.get("arrival_threshold_intermediate_m", 0.6) # Tussen-waypoints
+        self.arrival_threshold_final = nav_config.get("arrival_threshold_final_m", 0.3)        # Laatste waypoint
+        
+        # Missie status
         self.waypoints = []
+        self.current_wp_index = 0
+        self.target_speed_kmh = 0.0
         self.mode = "pure_pursuit"
-        self.doel_snelheid_kmh = 0.0
         
-        self.lookahead_distance = 1.5
-        self.tuning_gain = 1.0
-        
-        # --- Elektronisch Differentieel ---
-        self.differentieel_sterkte = 0.0
-        self.max_stuurhoek = 45.0
+        self.is_active = False
+        self.nav_thread = None
 
-        self.active = False
-        self.thread = None
-        self._huidige_dac_links = DAC_RUST
-        self._huidige_dac_rechts = DAC_RUST
-        self.logger_agent = logging.getLogger(__name__)
-
-    def start(self, waypoints, mode="pure_pursuit", target_speed_kmh=2.0,
-              lookahead_distance=1.5, gain=1.0):
+    def load_route(self, waypoints, speed_kmh):
+        """
+        Laadt een nieuwe route in.
+        :param waypoints: Lijst met dicts [{"lat": 52.1, "lon": 4.1}, ...]
+        """
         self.waypoints = waypoints
-        self.mode = mode
-        self.doel_snelheid_kmh = target_speed_kmh
-        self.lookahead_distance = lookahead_distance
-        self.tuning_gain = gain
-        
-        if not self.active:
-            self.active = True
-            try:
-                self.logger.start_nieuwe_rit(navigatie_modus=mode)
-            except Exception:
-                pass
-            self.thread = threading.Thread(target=self._nav_loop, daemon=True)
-            self.thread.start()
-            self.logger_agent.info(f"Autonome navigatie gestart. Modus: {mode}")
+        self.current_wp_index = 0
+        self.target_speed_kmh = speed_kmh
+        self.logger.info(f"Route geladen met {len(waypoints)} waypoints. Doelsnelheid: {speed_kmh} km/h")
 
-    def update_sliders(self, target_speed_kmh=None, lookahead_distance=None, gain=None):
-        if target_speed_kmh is not None:
-            self.doel_snelheid_kmh = target_speed_kmh
-        if lookahead_distance is not None:
-            self.lookahead_distance = lookahead_distance
-        if gain is not None:
-            self.tuning_gain = gain
+    def start(self):
+        """Start de autonome navigatiemissie langs de geladen waypoints."""
+        if not self.waypoints:
+            self.logger.warning("Kan niet starten: Geen waypoints geladen!")
+            return
+            
+        if self.is_active:
+            self.stop()
+            
+        self.is_active = True
+        self.nav_thread = threading.Thread(target=self._navigation_loop, daemon=True)
+        self.nav_thread.start()
+        self.logger.info("Autonome navigatie GESTART.")
 
     def stop(self):
-        self.active = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
-        self.motor.stuur_motoren(DAC_RUST, DAC_RUST)
-        self.stuur.set_angle(0.0)
-        # Sluit logbestand netjes af
-        try:
-            self.logger.stop_log()
-        except Exception:
-            pass
-        self.logger_agent.info("Autonome navigatie gestopt. Motoren neutraal.")
+        """Stopt de navigatie direct en zet het voertuig veilig stil."""
+        self.is_active = False
+        if self.nav_thread and self.nav_thread.is_alive():
+            self.nav_thread.join(timeout=1.0)
+            
+        # Laat de spieren direct stoppen
+        self.vehicle.stop()
+        self.logger.info("Navigatie GESTOPT. Voertuig staat stil.")
 
-    def _smooth_dac(self, huidig, doel):
-        """Voorkomt te hard optrekken / remmen."""
-        if doel > huidig:
-            return min(doel, huidig + 120)
-        elif doel < huidig:
-            return max(doel, huidig - 180)
-        return huidig
-
-    def _nav_loop(self):
-        wp_idx = 0
-        R_EARTH = 6371000.0
-        is_laatste_wp = False
-
-        while self.active:
+    def _navigation_loop(self):
+        """
+        De hoofd-regellus (10 Hz). Berekent continu de positie, 
+        het volgende doel en de benodigde stuurcorrectie.
+        """
+        rate_hz = 10.0
+        interval = 1.0 / rate_hz
+        
+        while self.is_active and self.current_wp_index < len(self.waypoints):
             start_time = time.time()
-
-            curr = self.gps.current_position
-            current_heading = self.gps.current_heading
-
-            if not curr or curr.get("fix", 0) < 4:
-                self.motor.stuur_motoren(DAC_RUST, DAC_RUST)
-                time.sleep(0.1)
+            
+            # 1. Haal de nieuwste (hybride) GPS data op
+            curr_pos = self.gps.get_current_position()
+            
+            if not curr_pos or curr_pos.get("lat") == 0.0 or curr_pos.get("fix", 0) < 2:
+                self.logger.warning("Wachten op goede GPS/RTK fix...")
+                self.vehicle.drive(0.0, 0.0) # Veiligheid: stop met rijden bij slecht signaal
+                time.sleep(0.5)
                 continue
-
-            # ── Alle waypoints gereden? ──────────────────────────────────────
-            if wp_idx >= len(self.waypoints):
-                self.logger_agent.info("Alle waypoints bereikt. Route afgerond.")
-                break
-
-            target_wp = self.waypoints[wp_idx]
-            is_laatste_wp = (wp_idx == len(self.waypoints) - 1)
-
-            # ── Afstand en lagerhoek naar huidig doel-waypoint ───────────────
-            lat1 = math.radians(curr["lat"])
-            lon1 = math.radians(curr["lon"])
-            lat2 = math.radians(target_wp["lat"])
-            lon2 = math.radians(target_wp["lon"])
-            dlat = lat2 - lat1
-            dlon = lon2 - lon1
-
-            a = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlon/2)**2
-            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-            dist_to_target = R_EARTH * c
-
-            y_brg = math.sin(dlon) * math.cos(lat2)
-            x_brg = (math.cos(lat1)*math.sin(lat2)
-                     - math.sin(lat1)*math.cos(lat2)*math.cos(dlon))
-            target_bearing = (math.degrees(math.atan2(y_brg, x_brg)) + 360) % 360
-
-            fout_graden = target_bearing - current_heading
-            if fout_graden > 180:
-                fout_graden -= 360
-            elif fout_graden < -180:
-                fout_graden += 360
-
-            # ── Waypoint-aankomst controleren ────────────────────────────────
-            drempel = AANKOMST_DREMPEL_EINDE if is_laatste_wp else AANKOMST_DREMPEL_TUSSEN
-
-            if dist_to_target < drempel:
-                if is_laatste_wp:
-                    # Laatste punt bereikt: log de eindpositie, stop dan hard
-                    elapsed = time.time() - start_time
-                    target_mps = self.doel_snelheid_kmh / 3.6
-                    try:
-                        self.logger.log_regel(
-                            wp_idx=wp_idx, modus=self.mode,
-                            lat=curr["lat"], lon=curr["lon"],
-                            fix=curr.get("fix", 0), hdop=curr.get("hdop", 99.0),
-                            heading_echt=current_heading, heading_doel=target_bearing,
-                            heading_fout=fout_graden, stuurhoek=0.0,
-                            doel_kmh=self.doel_snelheid_kmh, echt_kmh=target_mps * 3.6,
-                            dac_links=DAC_RUST, dac_rechts=DAC_RUST,
-                            dist_wp=dist_to_target,
-                            lookahead=self.lookahead_distance if self.mode == "pure_pursuit" else 0.0,
-                            dt=elapsed
-                        )
-                    except Exception:
-                        pass
-
-                    self.logger_agent.info(
-                        f"Eindpunt bereikt (wp {wp_idx}, dist={dist_to_target:.2f}m). Stoppen."
+                
+            curr_lat = curr_pos["lat"]
+            curr_lon = curr_pos["lon"]
+            curr_heading = curr_pos["heading"]
+            
+            # 2. Bepaal het huidige doelpunt (Waypoint)
+            target_wp = self.waypoints[self.current_wp_index]
+            is_last_wp = (self.current_wp_index == len(self.waypoints) - 1)
+            
+            # 3. Bereken afstand en absolute richting (Bearing) naar waypoint
+            distance = self._calculate_distance(curr_lat, curr_lon, target_wp["lat"], target_wp["lon"])
+            target_bearing = self._calculate_bearing(curr_lat, curr_lon, target_wp["lat"], target_wp["lon"])
+            
+            # 4. Check of we zijn aangekomen bij het doelpunt
+            threshold = self.arrival_threshold_final if is_last_wp else self.arrival_threshold_inter
+            if distance <= threshold:
+                self.logger.info(f"Waypoint {self.current_wp_index} bereikt (afstand: {distance:.2f}m).")
+                self.current_wp_index += 1
+                if self.current_wp_index >= len(self.waypoints):
+                    self.logger.info("🏁 Eindbestemming bereikt! Missie voltooid.")
+                    break # Verlaat de loop, we zijn klaar!
+                continue # Direct doorrekenen naar volgende waypoint
+                
+            # 5. PURE PURSUIT BEREKENING
+            # Alpha: De hoek tussen onze huidige neus en de lijn naar het doelpunt
+            alpha = target_bearing - curr_heading
+            alpha = (alpha + 180) % 360 - 180 # Normaliseer naar -180 tot +180 graden
+            
+            # Delta (Stuurhoek): pure pursuit formule -> atan2(2 * Wielbasis * sin(alpha), Lookahead)
+            alpha_rad = math.radians(alpha)
+            desired_steering_angle = math.degrees(
+                math.atan2(2.0 * self.wheelbase * math.sin(alpha_rad), self.lookahead_distance)
+            )
+            
+            # Beperk de hoek tot de fysieke limieten van het zwenkwiel
+            final_steering_angle = max(-self.max_angle, min(self.max_angle, desired_steering_angle))
+            
+            # 6. STUUR HET VOERTUIG AAN
+            # De VehicleController handelt het differentieel, smoothing en anti-stall af.
+            self.vehicle.drive(self.target_speed_kmh, final_steering_angle)
+            
+            # 7. LOGGING (Optioneel, overgenomen uit je oude code)
+            if self.drive_logger:
+                try:
+                    self.drive_logger.log_regel(
+                        wp_idx=self.current_wp_index, 
+                        modus=self.mode,
+                        lat=curr_lat, 
+                        lon=curr_lon,
+                        fix=curr_pos.get("fix", 0), 
+                        hdop=curr_pos.get("hdop", 99.0),
+                        heading_echt=curr_heading, 
+                        heading_doel=target_bearing,
+                        heading_fout=alpha, 
+                        stuurhoek=final_steering_angle,
+                        doel_kmh=self.target_speed_kmh, 
+                        echt_kmh=curr_pos.get("speed_kmh", 0.0),
+                        dist_wp=distance,
+                        lookahead=self.lookahead_distance,
+                        dt=(time.time() - start_time)
                     )
-                    break   # verlaat de loop → finally-blok handelt stop af
-                else:
-                    # Tussenliggend punt: ga door naar volgend waypoint
-                    self.logger_agent.info(
-                        f"Waypoint {wp_idx} bereikt (dist={dist_to_target:.2f}m), "
-                        f"door naar waypoint {wp_idx + 1}."
-                    )
-                    wp_idx += 1
-                    continue
-
-            # ── Stuurhoek berekenen ──────────────────────────────────────────
-            doel_stuurhoek = 0.0
-
-            if self.mode == "point_to_point":
-                doel_stuurhoek = fout_graden * self.tuning_gain
-
-            elif self.mode == "pure_pursuit":
-                alpha_rad = math.radians(fout_graden)
-                wheelbase = 1.1
-                num = 2.0 * wheelbase * math.sin(alpha_rad)
-                den = max(0.2, self.lookahead_distance)
-                doel_stuurhoek = math.degrees(math.atan2(num, den)) * self.tuning_gain
-
-            gelimiteerde_stuurhoek = max(-self.max_stuurhoek,
-                                         min(self.max_stuurhoek, doel_stuurhoek))
-            self.stuur.set_angle(gelimiteerde_stuurhoek)
-
-            # ── Snelheid + Elektronisch Differentieel ───────────────────────
-            target_mps = self.doel_snelheid_kmh / 3.6
-            mps_links  = target_mps
-            mps_rechts = target_mps
-
-            if self.differentieel_sterkte > 0.0 and target_mps > 0:
-                draai_factor = abs(gelimiteerde_stuurhoek) / self.max_stuurhoek
-                snelheids_reductie = 1.0 - (draai_factor * self.differentieel_sterkte)
-
-                if gelimiteerde_stuurhoek > 2.0:
-                    mps_rechts = target_mps * snelheids_reductie
-                elif gelimiteerde_stuurhoek < -2.0:
-                    mps_links = target_mps * snelheids_reductie
-
-            doel_dac_links  = speed_mps_to_dac(mps_links)
-            doel_dac_rechts = speed_mps_to_dac(mps_rechts)
-
-            self._huidige_dac_links  = self._smooth_dac(self._huidige_dac_links,  doel_dac_links)
-            self._huidige_dac_rechts = self._smooth_dac(self._huidige_dac_rechts, doel_dac_rechts)
-
-            self.motor.stuur_motoren(self._huidige_dac_links, self._huidige_dac_rechts)
-
-            # ── Logging ──────────────────────────────────────────────────────
+                except Exception as e:
+                    self.logger.error(f"Fout bij loggen: {e}")
+            
+            # 8. Wacht strak tot het volgende 10Hz tick-moment
             elapsed = time.time() - start_time
-            try:
-                self.logger.log_regel(
-                    wp_idx=wp_idx, modus=self.mode,
-                    lat=curr["lat"], lon=curr["lon"],
-                    fix=curr.get("fix", 0), hdop=curr.get("hdop", 99.0),
-                    heading_echt=current_heading, heading_doel=target_bearing,
-                    heading_fout=fout_graden, stuurhoek=gelimiteerde_stuurhoek,
-                    doel_kmh=self.doel_snelheid_kmh, echt_kmh=target_mps * 3.6,
-                    dac_links=self._huidige_dac_links, dac_rechts=self._huidige_dac_rechts,
-                    dist_wp=dist_to_target,
-                    lookahead=self.lookahead_distance if self.mode == "pure_pursuit" else 0.0,
-                    dt=elapsed
-                )
-            except Exception:
-                pass
+            sleep_time = max(0.01, interval - elapsed)
+            time.sleep(sleep_time)
+            
+        # Als de missie klaar is of wordt gestopt:
+        self.is_active = False
+        self.vehicle.stop()
 
-            elapsed = time.time() - start_time
-            time.sleep(max(0.01, 0.1 - elapsed))
+    # --- HULPFUNCTIES (Wiskunde) ---
 
-        # ── Opruimen na verlaten loop ────────────────────────────────────────
-        self.active = False
-        self.motor.stuur_motoren(DAC_RUST, DAC_RUST)
-        self.stuur.set_angle(0.0)
-        try:
-            self.logger.stop_log()
-        except Exception:
-            pass
-        self.logger_agent.info("Nav-loop beëindigd. Motoren neutraal, log gesloten.")
+    def _calculate_distance(self, lat1, lon1, lat2, lon2):
+        """Berekent de afstand in meters tussen twee GPS coördinaten (Haversine)."""
+        R = 6371000.0 # Aardstraal in meters
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+
+    def _calculate_bearing(self, lat1, lon1, lat2, lon2):
+        """Berekent de kompasrichting (0-360 graden) van positie 1 naar positie 2."""
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        delta_lambda = math.radians(lon2 - lon1)
+        
+        y = math.sin(delta_lambda) * math.cos(phi2)
+        x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
+        
+        bearing = math.degrees(math.atan2(y, x))
+        return (bearing + 360) % 360

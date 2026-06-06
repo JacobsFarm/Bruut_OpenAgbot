@@ -1,13 +1,28 @@
+import os
+import json
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.hardware.gps_logic import GpsSystem
+from app.services.vehicle_controller import VehicleController
+from app.services.navigator import Navigator
+from app.services.ab_navigator import ABNavigator
+
+config_path = os.path.join('data', 'config.example.json')
+with open(config_path, 'r') as f:
+    config = json.load(f)
+
+gps_system = GpsSystem(config)
+vehicle_controller = VehicleController(config)
+navigator = Navigator(gps_system, vehicle_controller, config)
+ab_navigator = ABNavigator(gps_system, vehicle_controller, config)
+
 from app.api.endpoints import router as api_router
-import os
 
 def create_app():
     app = FastAPI(title="Bruut OpenAgbot")
 
-    # Voorkomt verbindingsproblemen tijdens lokaal testen
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -16,10 +31,8 @@ def create_app():
         allow_headers=["*"],
     )
 
-    # 1. Koppel onze nieuwe Agbot API (Motor, GPS, Vision)
     app.include_router(api_router, prefix="/api")
 
-    # 2. Serveer de Svelte frontend map (de /dist map die je hebt gebouwd)
     if os.path.exists("frontend/dist"):
         app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
     else:

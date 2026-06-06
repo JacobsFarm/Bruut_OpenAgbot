@@ -3,17 +3,34 @@
     "os": "linux" 
   },
   "hardware": {
-    "gps_port": "/dev/ttyACM1",
-    "gps_heading_port": "/dev/ttyACM0",
+    "gps_port": "/dev/ttyACM2",
+    "gps_heading_port": "/dev/ttyACM1",
     "gps_baudrate": 115200, 
-    "arduino_dac_port": "/dev/ttyACM2", 
+    "arduino_dac_port": "/dev/ttyACM3", 
     "arduino_dac_baudrate": 115200,
-    "arduino_stepper_port": "/dev/ttyACM3", 
+    "arduino_stepper_port": "/dev/ttyACM0", 
     "arduino_stepper_baudrate": 9600
   },
+  "vehicle": {
+    "wheelbase_m": 1.20,
+    "track_width_m": 1.00,
+    "max_wheel_diff_dac": 1000.0
+  },
   "steering": {
-    "max_angle_degrees": 45.0,
-    "invert_direction": false
+    "max_angle_degrees": 50.0,
+    "invert_direction": true
+  },
+  "motor_control": {
+    "dac_stop": 700,
+    "dac_min_start": 1200,
+    "dac_max": 3100,
+    "max_dac_step_per_sec": 800.0,
+    "smoothing_interval_sec": 0.05
+  },
+  "navigation": {
+    "lookahead_distance_m": 3.0,
+    "arrival_threshold_intermediate_m": 0.8,
+    "arrival_threshold_final_m": 0.8
   },
   "ntrip": {
     "host": "caster.centipede.fr",

@@ -25,4 +25,4 @@ if __name__ == '__main__':
     print(f"👉 Toegang via het netwerk (Wifi/Hotspot): http://{local_ip}:8000")
     
     # Start de webserver op 0.0.0.0 zodat deze op alle interfaces luistert
-    uvicorn.run("run:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("run:app", host="0.0.0.0", port=8000, reload=False, access_log=False)
