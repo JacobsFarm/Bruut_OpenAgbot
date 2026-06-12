@@ -52,7 +52,7 @@ axle_dia = 10.2; //specs from Quinder are: Mounting hole: max 10.2mm
 bolt_dia = 14.2;
 
 // Bracket Geometry universal
-bracket_thick = 5;
+bracket_thick = 4;
 bracket_bolt_diameter = 10.4; //dikte van de gaten van gaten van de wiel_bracket     
 tire_clearance = 130;      
 side_plate_top_width = 240;
@@ -66,7 +66,7 @@ side_hole_pitch = 100;
 
 tab_length = 40;         // Lengte van de nok/sleuf
 tab_offset_y = 40;       // Positie vanaf het midden over de Y-as (uit elkaar)
-laser_tolerance = 0.5;   // Extra snijspeling zodat het makkelijk in elkaar schuift
+laser_tolerance = 1.0;   // Extra snijspeling zodat het makkelijk in elkaar schuift
 
 //top plate
 bracket_top_hole_dist_x = 80; // De totale gewenste afstand over de X-as
@@ -82,7 +82,7 @@ bracket_top_z = arm_height + bracket_thick;
 axle_hex_width = 110;          
 axle_hex_height = 40;
 axle_hex_straight_part = 30;   
-axle_bracket_thickness = 5;    
+axle_bracket_thickness = 4;    
 
 axle_hole_diameter = 10.3; //Dikte van het gaten in de axle_bracket
 axle_hole_distance = 40; //hoogte vanaf de onderkant tot de wiel ophanging
@@ -92,7 +92,7 @@ axle_round_dia = bolt_dia;  // Gebruikt 14.2 uit parameters
 
 // --- Caster Wheel Parameters ---  
 bracket_width            = 80;  
-bracket_thickness        = 5;
+bracket_thickness        = 4;
 caster_wheel_axle_width  = 130;   
 caster_wheel_axle_diameter = 20;
 bracket_axle_hole_diameter = 10.4;
