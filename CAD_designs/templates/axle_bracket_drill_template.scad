@@ -1,7 +1,7 @@
 // ==========================================
 // LOCAL TEMPLATE CONFIG (Hardcoded)
 // ==========================================
-tpl_width = 80;        // Wider than the hole spacing (axle_hole_distance is 30)
+tpl_width = 100;        // Wider than the hole spacing (axle_hole_distance is 30)
 tpl_height = 55;       // Tall enough to cover the axle slot and holes
 tpl_thickness = 5;     // Thickness of the 3D-printed template
 tpl_clearance = 0.3;   // Extra tolerance so drill/bolt does not bind in plastic
