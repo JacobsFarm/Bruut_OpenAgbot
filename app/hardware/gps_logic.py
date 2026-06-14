@@ -6,6 +6,11 @@ import base64
 import math
 
 class GpsSystem:
+    """
+    De 'Ogen en Zintuigen' van de AgBot.
+    Verzamelt RTK-gecorrigeerde positiedata (10Hz) en combineert dit met 
+    een hybride heading-systeem (Dual-Antenna bij stilstand, Kinematisch bij beweging).
+    """
     def __init__(self, config):
         self.gps_port = config['hardware']['gps_port']
         # Haal de tweede poort op (met fallback voor als hij niet in config staat)
@@ -19,8 +24,9 @@ class GpsSystem:
         self.current_position = {"lat": 0.0, "lon": 0.0, "fix": 0, "hdop": 99.0}
         self.heading_position = {"lat": 0.0, "lon": 0.0, "fix": 0}
         
-        # De live kompasrichting van de AgBot
+        # De live variabelen die door de Navigator worden uitgelezen
         self.current_heading = 0.0 
+        self.current_speed_kmh = 0.0
         
         self._running = False
         self.connect()
@@ -45,21 +51,41 @@ class GpsSystem:
         except Exception as e:
             print(f"[GPS ERROR] Kan niet verbinden: {e}")
 
+    def get_current_position(self):
+        """
+        Geeft een schone dictionary terug aan de Navigator (of andere services)
+        met alle actuele, gecombineerde data.
+        """
+        return {
+            "lat": self.current_position["lat"],
+            "lon": self.current_position["lon"],
+            "fix": self.current_position["fix"],
+            "hdop": self.current_position["hdop"],
+            "heading": self.current_heading,
+            "speed_kmh": self.current_speed_kmh
+        }
+
     def _lees_main_gps(self):
-        """Leest NMEA data van het 10Hz F9P board achterop"""
+        """Leest NMEA data van het 10Hz F9P board achterop."""
         while self._running and self.ser_main and self.ser_main.is_open:
             try:
                 raw_bytes = self.ser_main.readline()
                 if not raw_bytes: continue
                 raw_text = raw_bytes.decode("ascii", errors="ignore").strip()
                 
+                # Positie data ($GNGGA of $GPGGA)
                 if raw_text.startswith("$GNGGA") or raw_text.startswith("$GPGGA"):
                     self._parse_gga(raw_text)
+                    
+                # Beweging & Koers data ($GNVTG of $GPVTG) op 10 Hz
+                elif raw_text.startswith("$GNVTG") or raw_text.startswith("$GPVTG"):
+                    self._parse_vtg(raw_text)
+                    
             except Exception:
                 time.sleep(0.1)
 
     def _lees_heading_gps(self):
-        """Leest binaire UBX data van het 1Hz X20D board voorop"""
+        """Leest binaire UBX data van het 1Hz X20D board voorop."""
         while self._running and self.ser_heading and self.ser_heading.is_open:
             try:
                 if self.ser_heading.read(1) == b'\xb5' and self.ser_heading.read(1) == b'\x62':
@@ -80,24 +106,29 @@ class GpsSystem:
                         self.heading_position["lat"] = lat_int * 1e-7
                         self.heading_position["fix"] = quality
                         
-                        # Zodra de voorste een update krijgt, rekenen we de hoek direct uit
+                        # Update de statische heading
                         self._update_live_heading()
             except Exception:
                 time.sleep(0.1)
 
     def _update_live_heading(self):
-        """Berekent de ware kompasrichting tussen achter (main) en voor (heading)"""
-        lat1, lon1 = self.current_position["lat"], self.current_position["lon"]
-        lat2, lon2 = self.heading_position["lat"], self.heading_position["lon"]
-        
-        if lat1 != 0.0 and lat2 != 0.0:
-            lat1_r, lon1_r, lat2_r, lon2_r = map(math.radians, [lat1, lon1, lat2, lon2])
-            dLon = lon2_r - lon1_r
-            x = math.sin(dLon) * math.cos(lat2_r)
-            y = math.cos(lat1_r) * math.sin(lat2_r) - (math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dLon))
-            self.current_heading = (math.degrees(math.atan2(x, y)) + 360) % 360
+        """
+        Berekent de ware kompasrichting tussen achter (main) en voor (heading).
+        Wordt ALLEEN toegepast als de robot (vrijwel) stilstaat.
+        """
+        if self.current_speed_kmh < 0.5:
+            lat1, lon1 = self.current_position["lat"], self.current_position["lon"]
+            lat2, lon2 = self.heading_position["lat"], self.heading_position["lon"]
+            
+            if lat1 != 0.0 and lat2 != 0.0:
+                lat1_r, lon1_r, lat2_r, lon2_r = map(math.radians, [lat1, lon1, lat2, lon2])
+                dLon = lon2_r - lon1_r
+                x = math.sin(dLon) * math.cos(lat2_r)
+                y = math.cos(lat1_r) * math.sin(lat2_r) - (math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dLon))
+                self.current_heading = (math.degrees(math.atan2(x, y)) + 360) % 360
 
     def _parse_gga(self, sentence):
+        """Extraheert X/Y positie en nauwkeurigheid."""
         try:
             parts = sentence.split(",")
             if len(parts) < 10: return
@@ -111,6 +142,24 @@ class GpsSystem:
         except Exception:
             pass
 
+    def _parse_vtg(self, sentence):
+        """
+        Extraheert de actuele snelheid en (als we rijden) de zeer nauwkeurige 
+        kinematische koers (Course Over Ground) rechtstreeks van de GPS chip.
+        """
+        try:
+            parts = sentence.split(",")
+            # VTG Formaat: $GPVTG, course, T, reference, M, speed_knots, N, speed_kmh, K, mode*checksum
+            if len(parts) >= 8 and parts[7]:
+                self.current_speed_kmh = float(parts[7])
+                
+                # parts[1] is de True Heading in graden
+                # We updaten de heading op 10Hz met deze waarde als we rijden (>0.5 km/h)
+                if self.current_speed_kmh >= 0.5 and parts[1]:
+                    self.current_heading = float(parts[1])
+        except Exception:
+            pass
+
     def _nmea_to_decimal(self, value, direction):
         if not value: return 0.0
         degrees = int(float(value) / 100)
@@ -120,6 +169,7 @@ class GpsSystem:
         return decimal
 
     def _start_ntrip(self):
+        """Haalt RTK correctiedata op via internet en stuurt dit naar de GPS-borden."""
         while self._running:
             try:
                 auth = base64.b64encode(f"{self.ntrip_cfg['user']}:{self.ntrip_cfg['pass']}".encode()).decode()

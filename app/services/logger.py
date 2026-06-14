@@ -10,31 +10,28 @@ class DriveLogger:
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir, exist_ok=True)
 
-    def start_nieuwe_rit(self):
+    def start_nieuwe_rit(self, navigatie_modus="autonoom"):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(self.log_dir, f"rit_{timestamp}.csv")
+        self.log_file = os.path.join(self.log_dir, f"rit_{navigatie_modus}_{timestamp}.csv")
         
         try:
             with open(self.log_file, mode='w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
-                    "Tijdstip", "WP_Doel", "Lat", "Lon", 
-                    "Fix", "HDOP",
-                    "Heading", "Doel_Heading", "Fout_Graden", "XTE_Meters", 
-                    "Snelheid_Doel_kmh", "Snelheid_Echt_kmh",
-                    "Ruwe_Turn", "Ruwe_PI_Corr", "PI_Integraal",
-                    "DAC_Links", "DAC_Rechts", "Afstand_tot_WP", 
-                    "Delta_Tijd_Sec",
-                    "Lookahead_Lat", "Lookahead_Lon" # <-- NIEUWE KOLOMMEN
+                    "Tijdstip", "Modus", "WP_Doel", "Lat", "Lon", "Fix", "HDOP",
+                    "Heading_Echt", "Heading_Doel", "Heading_Fout",
+                    "Stuurhoek", "Doel_kmh", "Echt_kmh",
+                    "DAC_Links", "DAC_Rechts",
+                    "Afstand_tot_WP_m", "Lookahead_m", "Loop_Tijd_s"
                 ])
-            print(f"[LOGGER] Nieuwe rit gestart (met Look-Ahead data): {self.log_file}")
-        except Exception as e:
-            print(f"[LOGGER ERROR] Kan logbestand niet aanmaken: {e}")
+        except Exception:
             self.log_file = None
 
-    def log_regel(self, wp_idx, lat, lon, fix, hdop, heading, doel_heading, 
-                  fout, xte, doel_kmh, echt_kmh, turn, pi_corr, i_term, 
-                  links, rechts, dist, dt, lookahead_lat, lookahead_lon): # <-- NIEUWE ARGUMENTEN
+    def log_regel(self, modus="", wp_idx=0, lat=0.0, lon=0.0, fix=0, hdop=99.0,
+                  heading_echt=0.0, heading_doel=0.0, heading_fout=0.0,
+                  stuurhoek=0.0, doel_kmh=0.0, echt_kmh=0.0,
+                  dac_links=0, dac_rechts=0,
+                  dist_wp=0.0, lookahead=0.0, dt=0.0):
         if not self.log_file:
             return
 
@@ -42,17 +39,30 @@ class DriveLogger:
             with open(self.log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 tijdstip_nu = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                
                 writer.writerow([
-                    tijdstip_nu, wp_idx, lat, lon, 
-                    fix, hdop, 
-                    round(heading, 2), round(doel_heading, 2), 
-                    round(fout, 2), round(xte, 3), 
-                    round(doel_kmh, 2), round(echt_kmh, 2),
-                    round(turn, 1), round(pi_corr, 1), round(i_term, 3),
-                    links, rechts, round(dist, 2), 
-                    round(dt, 3),
-                    lookahead_lat, lookahead_lon # <-- NIEUWE DATA OPSLAAN
+                    tijdstip_nu, modus, wp_idx, lat, lon, fix, hdop,
+                    round(heading_echt, 2) if heading_echt else 0.0, 
+                    round(heading_doel, 2) if heading_doel else 0.0, 
+                    round(heading_fout, 2) if heading_fout else 0.0,
+                    round(stuurhoek, 2) if stuurhoek else 0.0, 
+                    round(doel_kmh, 2) if doel_kmh else 0.0, 
+                    round(echt_kmh, 2) if echt_kmh else 0.0,
+                    int(dac_links) if dac_links else 0, 
+                    int(dac_rechts) if dac_rechts else 0,
+                    round(dist_wp, 3) if dist_wp else 0.0, 
+                    round(lookahead, 2) if lookahead else 0.0, 
+                    round(dt, 4) if dt else 0.0
                 ])
         except Exception:
             pass
+
+    def stop_log(self):
+        if not self.log_file:
+            return
+        try:
+            with open(self.log_file, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["---", "EINDE RIT", "---"])
+        except Exception:
+            pass
+        self.log_file = None

@@ -4,8 +4,13 @@
     let status = "Gestopt";
     let waypoints = [];
     
-    // De nieuwe variabele voor doelsnelheid in km/h (standaard op 3.0 km/h)
-    let targetSpeed = 3.0; 
+    // Bijhouden welk waypoint is aangeklikt om uit te klappen
+    let selectedWp = null; 
+    
+    // Autonome tuning parameters
+    let targetSpeed = 2.0; 
+    let lookaheadDistance = 1.5;
+    let gain = 1.0;
 
     async function fetchWaypoints() {
         try {
@@ -36,183 +41,196 @@
         try {
             await fetch('/api/waypoints', { method: 'DELETE' });
             await fetchWaypoints();
+            selectedWp = null; // Sluit menuutje als alles is gewist
         } catch (e) {
             status = "Fout bij wissen";
         }
     }
 
-    async function startNav() {
+    async function updateSliders() {
+        await fetch('/api/nav/update_sliders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target_speed_kmh: parseFloat(targetSpeed),
+                lookahead_distance: parseFloat(lookaheadDistance),
+                gain: parseFloat(gain)
+            })
+        });
+    }
+
+    // --- Rij Direct (Rechte Lijn / Snappen) ---
+    async function startDirectSpecific(wp) {
+        status = "Starten Naar Punt (Rechte Lijn)...";
         try {
-            const res = await fetch('/api/start_nav', { 
+            const res = await fetch('/api/nav/start_point_to_point', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                // We sturen nu target_speed_kmh in plaats van base_pwm
-                body: JSON.stringify({ target_speed_kmh: targetSpeed })
+                body: JSON.stringify({
+                    lat: wp.lat,
+                    lon: wp.lon,
+                    target_speed_kmh: parseFloat(targetSpeed),
+                    gain: parseFloat(gain)
+                })
             });
-            if (res.ok) {
-                status = "Navigeren langs alle punten";
-            } else {
-                status = "Fout: Geen punten?";
-            }
+            const data = await res.json();
+            status = data.status || "Onderweg (Rechte Lijn)";
         } catch (e) {
-            status = "Netwerkfout";
+            status = "Fout bij starten";
         }
     }
 
-    async function navToPoint(wp) {
+    // --- NIEUW: Rij Direct via Pure Pursuit (Vloeiende bocht) ---
+    async function startPurePursuitSpecific(wp) {
+        status = "Starten Naar Punt (Pure Pursuit)...";
         try {
-            const res = await fetch('/api/start_nav_direct', {
+            const res = await fetch('/api/nav/start_pure_pursuit_direct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                // We sturen nu target_speed_kmh mee voor het directe punt
-                body: JSON.stringify({ lat: wp.lat, lon: wp.lon, target_speed_kmh: targetSpeed })
+                body: JSON.stringify({
+                    lat: wp.lat,
+                    lon: wp.lon,
+                    target_speed_kmh: parseFloat(targetSpeed),
+                    lookahead_distance: parseFloat(lookaheadDistance),
+                    gain: parseFloat(gain)
+                })
             });
-            if (res.ok) {
-                status = `Navigeren naar specifiek punt`;
-            }
+            const data = await res.json();
+            status = data.status || "Onderweg (Vloeiende Bocht)";
         } catch (e) {
-            status = "Netwerkfout bij direct navigeren";
+            status = "Fout bij starten";
+        }
+    }
+
+    // --- Start de volledige route ---
+    async function startPurePursuit() {
+        status = "Starten Volledige Route...";
+        try {
+            const res = await fetch('/api/nav/start_pure_pursuit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    target_speed_kmh: parseFloat(targetSpeed),
+                    lookahead_distance: parseFloat(lookaheadDistance),
+                    gain: parseFloat(gain)
+                })
+            });
+            const data = await res.json();
+            status = data.status || "Volledige Route Actief";
+        } catch (e) {
+            status = "Fout bij starten";
         }
     }
 
     async function stopNav() {
+        status = "Stoppen...";
         try {
-            const res = await fetch('/api/stop_nav', { method: 'POST' });
-            if (res.ok) {
-                status = "Gestopt";
-            }
+            const res = await fetch('/api/stop_nav', { method: 'POST' }); 
+            const data = await res.json();
+            status = data.status || "Gestopt";
         } catch (e) {
-            status = "Netwerkfout";
+            status = "Fout bij stoppen";
         }
     }
 
     onMount(fetchWaypoints);
 </script>
 
-<div class="navigation-panel">
-    <h2>Opgeslagen Punten & Navigatie</h2>
-    <p>Huidige Status: <strong>{status}</strong></p>
-    
-    <div class="slider-container">
-        <label for="speed">Doelsnelheid: {targetSpeed.toFixed(1)} km/h</label>
-        <input type="range" id="speed" min="1.0" max="7.7" step="0.1" bind:value={targetSpeed} />
+<div class="nav-container">
+    <h2>Route Navigatie</h2>
+    <div class="status-box">Status: <strong>{status}</strong></div>
+
+    <div class="sliders-box">
+        <h3>Tuning Parameters</h3>
+        <label>Snelheid ({targetSpeed} km/h)
+            <input type="range" min="0.5" max="5.0" step="0.1" bind:value={targetSpeed} on:change={updateSliders}>
+        </label>
+        
+        <label>Lookahead Afstand ({lookaheadDistance} m) <i>(Alleen Pure Pursuit)</i>
+            <input type="range" min="0.5" max="4.0" step="0.1" bind:value={lookaheadDistance} on:change={updateSliders}>
+        </label>
+
+        <label>Strakheid / Gain ({gain})
+            <input type="range" min="0.5" max="3.0" step="0.1" bind:value={gain} on:change={updateSliders}>
+        </label>
     </div>
 
     <div class="controls">
-        <button class="btn-add" on:click={addWaypoint}>Huidige GPS Opslaan als Punt</button>
-        <button class="btn-clear" on:click={clearWaypoints}>Wis Alle Punten</button>
+        <button class="btn-add" on:click={addWaypoint}>📍 + Waypoint op Huidige Positie</button>
+        <button class="btn-clear" on:click={clearWaypoints}>🗑️ Wis Alles</button>
     </div>
 
     <div class="waypoints-list">
-        <h3>Kies een punt om naartoe te rijden:</h3>
+        <h3>Route ({waypoints.length} punten)</h3>
+        <p class="instructie">Klik op een coördinaat in de lijst om acties te tonen</p>
+        
         {#if waypoints.length === 0}
-            <p>Je hebt nog geen punten opgeslagen.</p>
+            <p>Geen punten. Loop naar het begin en voeg punten toe.</p>
         {:else}
             <ul>
-                {#each waypoints as wp, index}
-                    <li>
-                        <span>Punt {index + 1} (Lat: {wp.lat.toFixed(5)}, Lon: {wp.lon.toFixed(5)})</span>
-                        <button class="btn-go" on:click={() => navToPoint(wp)}>Rijd Hierheen</button>
+                {#each waypoints as wp, i}
+                    <li class="waypoint-item">
+                        <div class="wp-header" 
+                             role="button" 
+                             tabindex="0" 
+                             on:click={() => selectedWp = (selectedWp === i ? null : i)}
+                             on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectedWp = (selectedWp === i ? null : i) }}>
+                            <strong>WP {i}</strong>: {wp.lat.toFixed(6)}, {wp.lon.toFixed(6)}
+                            <span class="pijl">{selectedWp === i ? '▲' : '▼'}</span>
+                        </div>
+                        
+                        {#if selectedWp === i}
+                            <div class="wp-actions">
+                                <button class="btn-start-alt" on:click={() => startDirectSpecific(wp)}>🎯 Rechte Lijn (Direct)</button>
+                                <button class="btn-start-bocht" on:click={() => startPurePursuitSpecific(wp)}>🌊 Vloeiend (Pure Pursuit)</button>
+                            </div>
+                        {/if}
                     </li>
                 {/each}
             </ul>
         {/if}
     </div>
 
-    <div class="controls">
-        <button class="btn-start" on:click={startNav}>Rijd Volledige Route (Alle punten)</button>
-        <button class="btn-stop" on:click={stopNav}>Stop / Noodstop</button>
+    <div class="controls start-controls">
+        <button class="btn-start" on:click={startPurePursuit}>🚀 Start Hele Route (Lijn Volgen)</button>
+        <button class="btn-stop" on:click={stopNav}>🛑 STOP (Noodrem)</button>
     </div>
 </div>
 
 <style>
-    .navigation-panel {
-        padding: 20px;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        background: #f9f9f9;
-        text-align: center;
-        font-family: Arial, sans-serif;
+    .nav-container { background: #f4f4f9; padding: 20px; border-radius: 8px; text-align: center; }
+    .status-box { background: #333; color: #fff; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
+    
+    .sliders-box { background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px; text-align: left; }
+    .sliders-box label { display: block; margin-bottom: 15px; font-weight: bold; }
+    .sliders-box input[type="range"] { width: 100%; margin-top: 5px; accent-color: #4CAF50; cursor: pointer; height: 30px;}
+    
+    .instructie { font-size: 13px; color: #666; margin-top: -10px; margin-bottom: 15px;}
+    .waypoints-list { margin: 20px 0; text-align: left; background: #fff; padding: 15px; border-radius: 4px; border: 1px solid #ddd; }
+    .waypoints-list ul { list-style-type: none; padding: 0; margin: 0; }
+    
+    .waypoint-item { border-bottom: 1px solid #eee; padding: 5px 0; }
+    .wp-header { 
+        padding: 12px; cursor: pointer; display: flex; justify-content: space-between; 
+        background: #f9f9f9; border-radius: 4px; transition: background 0.2s; font-size: 15px;
     }
-    .slider-container {
-        margin: 20px 0;
-        background: #fff;
-        padding: 15px;
-        border-radius: 4px;
-        border: 1px solid #ddd;
-    }
-    .slider-container label {
-        display: block;
-        font-weight: bold;
-        margin-bottom: 10px;
-        font-size: 1.1em;
-        color: #333;
-    }
-    .slider-container input[type="range"] {
-        width: 80%;
-        cursor: pointer;
-        accent-color: #28a745;
-    }
-    .waypoints-list {
-        margin: 20px 0;
-        text-align: left;
-        background: #fff;
-        padding: 15px;
-        border-radius: 4px;
-        border: 1px solid #ddd;
-    }
-    .waypoints-list ul {
-        list-style-type: none;
-        padding: 0;
-        margin: 0;
-    }
-    .waypoints-list li {
-        padding: 10px 0;
-        border-bottom: 1px solid #eee;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .waypoints-list li:last-child {
-        border-bottom: none;
-    }
-    .controls {
-        margin-top: 15px;
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-        flex-wrap: wrap;
-    }
-    button {
-        padding: 10px 20px;
-        font-size: 14px;
-        font-weight: bold;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-    }
-    .btn-add {
-        background-color: #007bff;
-        color: white;
-    }
-    .btn-clear {
-        background-color: #ffc107;
-        color: black;
-    }
-    .btn-go {
-        background-color: #17a2b8;
-        color: white;
-        padding: 8px 16px;
-    }
-    .btn-start {
-        background-color: #28a745;
-        color: white;
-    }
-    .btn-stop {
-        background-color: #dc3545;
-        color: white;
-    }
-    button:hover {
-        opacity: 0.85;
-    }
+    .wp-header:hover { background: #e9e9e9; }
+    .pijl { font-size: 12px; color: #888;}
+    
+    .wp-actions { padding: 10px; background: #f0f8ff; display: flex; gap: 10px; justify-content: center; border-radius: 0 0 4px 4px; border-top: 1px solid #ddd; }
+
+    .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 15px; }
+    .start-controls { margin-top: 30px; }
+    
+    button { padding: 12px 20px; font-size: 14px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; color: white; flex: 1; }
+    .btn-add { background: #007bff; flex: none;}
+    .btn-clear { background: #6c757d; flex: none;}
+    
+    .btn-start { background: #28a745; padding: 15px; font-size: 16px; flex: none; width: 100%;}
+    .btn-start-alt { background: #17a2b8; }
+    .btn-start-bocht { background: #6f42c1; } /* Mooie paarse kleur voor Pure Pursuit variant */
+    
+    .btn-stop { background: #dc3545; width: 100%; flex: none; padding: 20px; font-size: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);}
+    
+    button:active { filter: brightness(80%); transform: translateY(2px);}
 </style>

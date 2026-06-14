@@ -1,0 +1,41 @@
+{
+  "test_setup": {
+    "power_supply": {
+      "voltage": "48V DC"
+    },
+    "stepper_configuration": {
+      "motor_type": "NEMA 34 stepper motor",
+      "driver_model": "HBS86H",
+      "microsteps_per_revolution": 3200,
+      "dipswitch_settings": {
+        "sw1": "off",
+        "sw2": "off",
+        "sw3": "on",
+        "sw4": "on"
+      }
+    }
+  },
+  "test_results": {
+    "standard_test_1000_to_100_us": [
+      { "pulse_delay_us": 1000, "duration_ms": 6701.05 },
+      { "pulse_delay_us": 900,  "duration_ms": 6032.64 },
+      { "pulse_delay_us": 800,  "duration_ms": 5364.22 },
+      { "pulse_delay_us": 700,  "duration_ms": 4695s.79 },
+      { "pulse_delay_us": 600,  "duration_ms": 4027.37 },
+      { "pulse_delay_us": 500,  "duration_ms": 3358.95 },
+      { "pulse_delay_us": 400,  "duration_ms": 2690.53 },
+      { "pulse_delay_us": 300,  "duration_ms": 2022.13 },
+      { "pulse_delay_us": 200,  "duration_ms": 1353.79 },
+      { "pulse_delay_us": 100,  "duration_ms": 685.38 },
+      { "pulse_delay_us": 90,   "duration_ms": 618.42 },
+      { "pulse_delay_us": 80,   "duration_ms": 551.58 },
+      { "pulse_delay_us": 70,   "duration_ms": 484.74 },
+      { "pulse_delay_us": 60,   "duration_ms": 417.89 },
+      { "pulse_delay_us": 50,   "duration_ms": 351.05 },
+      { "pulse_delay_us": 40,   "duration_ms": 284.21 },
+      { "pulse_delay_us": 30,   "duration_ms": 217.37 },
+      { "pulse_delay_us": 20,   "duration_ms": 150.53 },
+      { "pulse_delay_us": 10,   "duration_ms": 83.68 }
+    ]
+  }
+}

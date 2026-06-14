@@ -23,7 +23,7 @@ base_length_step = 80;
 
 // Beam Profile (Purchased Part)
 beam_profile = 40;
-beam_thickness = 3;    
+beam_thickness = 2;    
 beam_length_1 = 1000;
 beam_length_2 = 1280;
 
