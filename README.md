@@ -4,7 +4,8 @@ Project for making the Bruut_OpenAgbot
 Follow along the project on youtube: https://www.youtube.com/@opensource_agbot/videos
 Visit the website for more information https://jacobsfarm.github.io/Bruut_openagbot_website/ 
 
-<img width="2144" height="1984" alt="Gemini_Generated_Image_ldpsodldpsodldps(1)" src="https://github.com/user-attachments/assets/1389b9fb-cad2-454f-907a-6cd15e57a0ce" />
+newest configuration the tricycle: 
+<img width="4080" height="3072" alt="PXL_20260605_101723456 MP" src="https://github.com/user-attachments/assets/86edab93-f211-4811-9a86-be289beabb02" />
 
 This repo contains all the code information and code for the Agbot bruut Project 
 The first runs for the prototype wil be used code in Python, C++ and the front end bases on svelte
