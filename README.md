@@ -11,8 +11,6 @@ This repo contains all the code information and code for the Agbot bruut Project
 The first runs for the prototype wil be used code in Python, C++ and the front end bases on svelte
 later the project wil immigrate to ROS 2 and Floxglove 
 
-The concept branch contains all the Openscad 3d model designs
-
 ## openscad project
 New cad designs after testing in the Field, stronger and more realistic designs and even more oppertunity for extensions
 
