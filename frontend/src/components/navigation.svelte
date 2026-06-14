@@ -3,9 +3,12 @@
 
     let status = "Gestopt";
     let waypoints = [];
-    
+
+    // Naam voor het volgende toe te voegen waypoint
+    let newWaypointName = "";
+
     // Bijhouden welk waypoint is aangeklikt om uit te klappen
-    let selectedWp = null; 
+    let selectedWp = null;
     
     // Autonome tuning parameters
     let targetSpeed = 2.0; 
@@ -25,12 +28,17 @@
         try {
             const statusRes = await fetch('/api/status');
             const gpsData = await statusRes.json();
-            
+
             await fetch('/api/waypoints', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lat: gpsData.lat, lon: gpsData.lon })
+                body: JSON.stringify({
+                    lat: gpsData.lat,
+                    lon: gpsData.lon,
+                    way_point_name: newWaypointName.trim()
+                })
             });
+            newWaypointName = "";
             await fetchWaypoints();
         } catch (e) {
             status = "Fout bij toevoegen";
@@ -104,6 +112,10 @@
 
     // --- Start de volledige route ---
     async function startPurePursuit() {
+        if (waypoints.length === 0) {
+            status = "Geen waypoints geladen — voeg eerst punten toe";
+            return;
+        }
         status = "Starten Volledige Route...";
         try {
             const res = await fetch('/api/nav/start_pure_pursuit', {
@@ -116,7 +128,8 @@
                 })
             });
             const data = await res.json();
-            status = data.status || "Volledige Route Actief";
+            // Toon de foutmelding van de server (bv. "Geen waypoints geladen")
+            status = data.status === "error" ? ("Fout: " + (data.msg || "onbekend")) : (data.status || "Volledige Route Actief");
         } catch (e) {
             status = "Fout bij starten";
         }
@@ -133,7 +146,23 @@
         }
     }
 
-    onMount(fetchWaypoints);
+    // Pollt live de navigatiestatus zodat zichtbaar is WAAROM de robot (niet) rijdt,
+    // bv. "Wachten op RTK-fix" of "Eindbestemming bereikt".
+    async function pollStatus() {
+        try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            if (data.navigator_active || (data.nav_state && data.nav_state !== "IDLE")) {
+                status = data.nav_message || data.nav_state || status;
+            }
+        } catch (e) { /* netwerk-hik: status laten staan */ }
+    }
+
+    onMount(() => {
+        fetchWaypoints();
+        const interval = setInterval(pollStatus, 1000);
+        return () => clearInterval(interval);
+    });
 </script>
 
 <div class="nav-container">
@@ -155,9 +184,17 @@
         </label>
     </div>
 
-    <div class="controls">
-        <button class="btn-add" on:click={addWaypoint}>📍 + Waypoint op Huidige Positie</button>
-        <button class="btn-clear" on:click={clearWaypoints}>🗑️ Wis Alles</button>
+    <div class="add-box">
+        <input
+            class="naam-input"
+            type="text"
+            placeholder="Naam van het punt (optioneel)"
+            bind:value={newWaypointName}
+            on:keydown={(e) => { if (e.key === 'Enter') addWaypoint(); }} />
+        <div class="controls">
+            <button class="btn-add" on:click={addWaypoint}>📍 + Waypoint op Huidige Positie</button>
+            <button class="btn-clear" on:click={clearWaypoints}>🗑️ Wis Alles</button>
+        </div>
     </div>
 
     <div class="waypoints-list">
@@ -175,7 +212,7 @@
                              tabindex="0" 
                              on:click={() => selectedWp = (selectedWp === i ? null : i)}
                              on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectedWp = (selectedWp === i ? null : i) }}>
-                            <strong>WP {i}</strong>: {wp.lat.toFixed(6)}, {wp.lon.toFixed(6)}
+                            <strong>{wp.way_point_name || `WP ${i}`}</strong>: {wp.lat.toFixed(6)}, {wp.lon.toFixed(6)}
                             <span class="pijl">{selectedWp === i ? '▲' : '▼'}</span>
                         </div>
                         
@@ -219,6 +256,8 @@
     
     .wp-actions { padding: 10px; background: #f0f8ff; display: flex; gap: 10px; justify-content: center; border-radius: 0 0 4px 4px; border-top: 1px solid #ddd; }
 
+    .add-box { margin-top: 15px; }
+    .naam-input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 15px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; }
     .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 15px; }
     .start-controls { margin-top: 30px; }
     

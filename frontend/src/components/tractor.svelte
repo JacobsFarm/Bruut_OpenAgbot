@@ -6,6 +6,10 @@
     let snelheid = 3.0;
     let statusBericht = "Kies een A-B lijn";
 
+    // Lijnvolging-tuning (lager = strakker/agressiever, hoger = soepeler)
+    let lookahead = 2.5;
+    let bochtSnelheid = 2.0;
+
     let opgeslagenLijnen = [];
     let geselecteerdeLijnIndex = -1;
 
@@ -59,7 +63,9 @@
                     field_length_m: veldlengte,
                     speed_kmh: snelheid,
                     lat_a: lat_a, lon_a: lon_a,
-                    lat_b: lat_b, lon_b: lon_b
+                    lat_b: lat_b, lon_b: lon_b,
+                    lookahead_m: parseFloat(lookahead),
+                    turn_speed_kmh: parseFloat(bochtSnelheid)
                 })
             });
             const data = await res.json();
@@ -71,6 +77,21 @@
         } catch(e) {
             statusBericht = "Netwerkfout";
         }
+    }
+
+    // Live aanpassen tijdens (of voor) een missie zodat je snel waardes kunt proberen
+    async function updateLijnvolging() {
+        try {
+            await fetch('/api/nav/update_ab_sliders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lookahead_m: parseFloat(lookahead),
+                    target_speed_kmh: parseFloat(snelheid),
+                    turn_speed_kmh: parseFloat(bochtSnelheid)
+                })
+            });
+        } catch(e) {}
     }
 
     async function noodstop() {
@@ -100,18 +121,42 @@
         <div class="config-box">
             <h3>2. Werk Instellingen</h3>
             <div class="slider-group">
-                <label>Werkbreedte: {werkbreedte.toFixed(1)}m</label>
-                <input type="range" min="1.0" max="10.0" step="0.1" bind:value={werkbreedte}>
+                <label>
+                    Werkbreedte: {werkbreedte.toFixed(1)}m
+                    <input type="range" min="1.0" max="10.0" step="0.1" bind:value={werkbreedte}>
+                </label>
             </div>
 
             <div class="slider-group">
-                <label>Veldlengte: {veldlengte.toFixed(0)}m</label>
-                <input type="range" min="10" max="200" step="5" bind:value={veldlengte}>
+                <label>
+                    Veldlengte: {veldlengte.toFixed(0)}m
+                    <input type="range" min="10" max="200" step="5" bind:value={veldlengte}>
+                </label>
             </div>
 
             <div class="slider-group">
-                <label>Werksnelheid: {snelheid.toFixed(1)} km/h</label>
-                <input type="range" min="0.5" max="7.0" step="0.1" bind:value={snelheid}>
+                <label>
+                    Werksnelheid: {snelheid.toFixed(1)} km/h
+                    <input type="range" min="0.5" max="7.0" step="0.1" bind:value={snelheid} on:change={updateLijnvolging}>
+                </label>
+            </div>
+        </div>
+
+        <div class="config-box">
+            <h3>3. Lijnvolging (live)</h3>
+            <p class="hint">Lager = strakker/agressiever volgen, hoger = soepeler. Werkt direct tijdens een lopende missie.</p>
+            <div class="slider-group">
+                <label>
+                    Lookahead (strak ⟷ soepel): {lookahead.toFixed(1)} m
+                    <input type="range" min="0.5" max="6.0" step="0.1" bind:value={lookahead} on:change={updateLijnvolging}>
+                </label>
+            </div>
+
+            <div class="slider-group">
+                <label>
+                    Bochtsnelheid: {bochtSnelheid.toFixed(1)} km/h
+                    <input type="range" min="0.5" max="5.0" step="0.1" bind:value={bochtSnelheid} on:change={updateLijnvolging}>
+                </label>
             </div>
         </div>
     </div>
@@ -134,6 +179,7 @@
     select { width: 100%; padding: 15px; font-size: 16px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #ccc; background: white; }
     .btn-refresh { width: 100%; padding: 12px; background: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
     
+    .hint { font-size: 13px; color: #666; margin-top: -5px; margin-bottom: 15px; }
     .slider-group { margin-bottom: 20px; }
     label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
     input[type="range"] { width: 100%; height: 30px; cursor: pointer; }

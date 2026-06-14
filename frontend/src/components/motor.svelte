@@ -60,13 +60,17 @@
 
     <div class="slider-box">
         <div class="slider-container">
-            <label>Snelheid: {snelheid.toFixed(1)} km/h</label>
-            <input type="range" min="0" max="7" step="0.1" bind:value={snelheid} on:input={stuurCommando}>
+            <label>
+                Snelheid: {snelheid.toFixed(1)} km/h
+                <input type="range" min="0" max="7" step="0.1" bind:value={snelheid} on:input={stuurCommando}>
+            </label>
         </div>
 
         <div class="slider-container">
-            <label>Stuur (RC Uitslag): {stuurPercentage > 0 ? 'Rechts' : stuurPercentage < 0 ? 'Links' : 'Rechtuit'} {Math.abs(stuurPercentage).toFixed(0)}%</label>
-            <input type="range" min="-100" max="100" step="1" bind:value={stuurPercentage} on:input={stuurCommando}>
+            <label>
+                Stuur (RC Uitslag): {stuurPercentage > 0 ? 'Rechts' : stuurPercentage < 0 ? 'Links' : 'Rechtuit'} {Math.abs(stuurPercentage).toFixed(0)}%
+                <input type="range" min="-100" max="100" step="1" bind:value={stuurPercentage} on:input={stuurCommando}>
+            </label>
             <button class="center-btn" on:click={() => { stuurPercentage = 0; stuurCommando(); }}>Zet Stuur Recht</button>
         </div>
     </div>

@@ -12,6 +12,9 @@ sudo chmod 666 /dev/ttyACM1
 
 inplaats van python roep je in linux/ubuntu python3 op
 
+sh: 1: vite: Permission denied *fix*
+chmod -R +x node_modules/.bin
+
 Vinden van de USB poorten op de jetson 
  ls /dev/ttyACM* /dev/ttyUSB*
 
@@ -43,5 +46,5 @@ total 0
 lrwxrwxrwx 1 root root 13 jun  5 09:39 usb-Arduino_UNO_R4_Minima_320B2D1839313139DD3033354B57336E-if00 -> ../../ttyACM3
 lrwxrwxrwx 1 root root 13 jan  1  1970 usb-Arduino_UNO_WiFi_R4_CMSIS-DAP_F412FA75D878-if01 -> ../../ttyACM2
 lrwxrwxrwx 1 root root 13 jan  1  1970 usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00 -> ../../ttyACM0
-jetson@jetson-desktop:~$ ls -l /dev/ttyACM*
-
+jetson@jetson-desktop:~$ ls -l /dev/ttyACM*      
+*

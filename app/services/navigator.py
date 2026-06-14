@@ -45,6 +45,8 @@ class Navigator:
         
         self.is_active = False
         self.nav_thread = None
+        self.state = "IDLE"            # IDLE | WACHT_OP_FIX | RIJDEN | KLAAR | FOUT
+        self.status_message = "Gestopt"
 
     def load_route(self, waypoints, speed_kmh):
         """
@@ -59,13 +61,21 @@ class Navigator:
     def start(self):
         """Start de autonome navigatiemissie langs de geladen waypoints."""
         if not self.waypoints:
+            self.state = "FOUT"
+            self.status_message = "Geen waypoints geladen"
             self.logger.warning("Kan niet starten: Geen waypoints geladen!")
             return
-            
+
         if self.is_active:
             self.stop()
-            
+
+        # Start een nieuw logbestand voor deze rit (anders wordt er niets gelogd).
+        if self.drive_logger:
+            self.drive_logger.start_nieuwe_rit(navigatie_modus="Waypoint_Route")
+
         self.is_active = True
+        self.state = "RIJDEN"
+        self.status_message = f"Route actief ({len(self.waypoints)} punten)"
         self.nav_thread = threading.Thread(target=self._navigation_loop, daemon=True)
         self.nav_thread.start()
         self.logger.info("Autonome navigatie GESTART.")
@@ -75,9 +85,14 @@ class Navigator:
         self.is_active = False
         if self.nav_thread and self.nav_thread.is_alive():
             self.nav_thread.join(timeout=1.0)
-            
+
         # Laat de spieren direct stoppen
         self.vehicle.stop()
+        if self.drive_logger:
+            self.drive_logger.stop_log()
+        if self.state not in ("KLAAR", "FOUT"):
+            self.state = "IDLE"
+            self.status_message = "Gestopt"
         self.logger.info("Navigatie GESTOPT. Voertuig staat stil.")
 
     def _navigation_loop(self):
@@ -87,19 +102,40 @@ class Navigator:
         """
         rate_hz = 10.0
         interval = 1.0 / rate_hz
-        
+
+        try:
+            self._run_loop(interval)
+        except Exception as e:
+            # Een onafgevangen fout zou de (daemon) thread stil laten sterven:
+            # geen rijden, geen logging, geen melding. Hier maken we hem zichtbaar.
+            self.state = "FOUT"
+            self.status_message = f"Navigatiefout: {e}"
+            self.logger.exception(f"Onverwachte fout in navigatie-lus: {e}")
+        finally:
+            self.is_active = False
+            self.vehicle.stop()
+            if self.drive_logger:
+                self.drive_logger.stop_log()
+
+    def _run_loop(self, interval):
         while self.is_active and self.current_wp_index < len(self.waypoints):
             start_time = time.time()
-            
+
             # 1. Haal de nieuwste (hybride) GPS data op
             curr_pos = self.gps.get_current_position()
-            
+
             if not curr_pos or curr_pos.get("lat") == 0.0 or curr_pos.get("fix", 0) < 2:
+                self.state = "WACHT_OP_FIX"
+                self.status_message = (
+                    f"Wachten op RTK-fix (fix={curr_pos.get('fix', 0) if curr_pos else 0})"
+                )
                 self.logger.warning("Wachten op goede GPS/RTK fix...")
                 self.vehicle.drive(0.0, 0.0) # Veiligheid: stop met rijden bij slecht signaal
                 time.sleep(0.5)
                 continue
-                
+
+            self.state = "RIJDEN"
+
             curr_lat = curr_pos["lat"]
             curr_lon = curr_pos["lon"]
             curr_heading = curr_pos["heading"]
@@ -118,6 +154,8 @@ class Navigator:
                 self.logger.info(f"Waypoint {self.current_wp_index} bereikt (afstand: {distance:.2f}m).")
                 self.current_wp_index += 1
                 if self.current_wp_index >= len(self.waypoints):
+                    self.state = "KLAAR"
+                    self.status_message = "Eindbestemming bereikt"
                     self.logger.info("🏁 Eindbestemming bereikt! Missie voltooid.")
                     break # Verlaat de loop, we zijn klaar!
                 continue # Direct doorrekenen naar volgende waypoint
@@ -167,10 +205,8 @@ class Navigator:
             elapsed = time.time() - start_time
             sleep_time = max(0.01, interval - elapsed)
             time.sleep(sleep_time)
-            
-        # Als de missie klaar is of wordt gestopt:
-        self.is_active = False
-        self.vehicle.stop()
+
+        # Afronden (stoppen, logbestand afsluiten) gebeurt in _navigation_loop().
 
     # --- HULPFUNCTIES (Wiskunde) ---
 

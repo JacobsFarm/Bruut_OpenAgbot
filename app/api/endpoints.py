@@ -32,6 +32,13 @@ class ABMissionCommand(BaseModel):
     lon_a: float
     lat_b: float
     lon_b: float
+    lookahead_m: float = None
+    turn_speed_kmh: float = None
+
+class ABSliderUpdateCommand(BaseModel):
+    lookahead_m: float = None
+    target_speed_kmh: float = None
+    turn_speed_kmh: float = None
 
 class PurePursuitStartCommand(BaseModel):
     target_speed_kmh: float
@@ -59,6 +66,7 @@ class SliderUpdateCommand(BaseModel):
 class Waypoint(BaseModel):
     lat: float
     lon: float
+    way_point_name: str = None
 
 def stop_alle_navigatie():
     if navigator.is_active:
@@ -94,6 +102,8 @@ def get_status():
     pos = gps_system.get_current_position()
     pos.update({
         "navigator_active": navigator.is_active,
+        "nav_state": navigator.state,
+        "nav_message": navigator.status_message,
         "ab_active": ab_navigator.is_active,
         "ab_state": ab_navigator.state,
         "current_wp": navigator.current_wp_index if navigator.is_active else 0,
@@ -137,8 +147,29 @@ def start_ab_mission(cmd: ABMissionCommand):
     stop_alle_navigatie()
     if not ab_navigator.set_ab_line(cmd.lat_a, cmd.lon_a, cmd.lat_b, cmd.lon_b):
         return {"status": "error", "msg": "Ongeldige A-B coördinaten"}
+    # Lijnvolging-tuning toepassen vóór de start (indien meegegeven)
+    if cmd.lookahead_m is not None:
+        ab_navigator.lookahead_m = cmd.lookahead_m
+    if cmd.turn_speed_kmh is not None:
+        ab_navigator.turn_speed_kmh = cmd.turn_speed_kmh
     ab_navigator.start_mission(cmd.work_width_m, cmd.field_length_m, cmd.speed_kmh)
     return {"status": "started"}
+
+@router.post("/nav/update_ab_sliders")
+def update_ab_sliders(cmd: ABSliderUpdateCommand):
+    """Live aanpassen van de AB-lijnvolging (werkt ook tijdens een lopende missie)."""
+    if cmd.lookahead_m is not None:
+        ab_navigator.lookahead_m = cmd.lookahead_m
+    if cmd.target_speed_kmh is not None:
+        ab_navigator.target_speed_kmh = cmd.target_speed_kmh
+    if cmd.turn_speed_kmh is not None:
+        ab_navigator.turn_speed_kmh = cmd.turn_speed_kmh
+    return {
+        "status": "Parameters geupdate",
+        "lookahead_m": ab_navigator.lookahead_m,
+        "target_speed_kmh": ab_navigator.target_speed_kmh,
+        "turn_speed_kmh": ab_navigator.turn_speed_kmh
+    }
 
 @router.get("/waypoints")
 def get_waypoints():
@@ -147,7 +178,10 @@ def get_waypoints():
 @router.post("/waypoints")
 def add_waypoint(wp: Waypoint):
     waypoints = laad_waypoints()
-    waypoints.append({"lat": wp.lat, "lon": wp.lon})
+    naam = wp.way_point_name.strip() if wp.way_point_name else ""
+    if not naam:
+        naam = f"point {len(waypoints) + 1}"
+    waypoints.append({"way_point_name": naam, "lat": wp.lat, "lon": wp.lon})
     bewaar_waypoints(waypoints)
     return {"status": "success", "total": len(waypoints)}
 

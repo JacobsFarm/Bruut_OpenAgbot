@@ -9,7 +9,14 @@ from app.services.vehicle_controller import VehicleController
 from app.services.navigator import Navigator
 from app.services.ab_navigator import ABNavigator
 
-config_path = os.path.join('data', 'config.example.json')
+# Gebruik je eigen 'config.json' als die bestaat; val anders terug op de
+# meegeleverde 'config.example.json' (het sjabloon).
+config_path = os.path.join('data', 'config.json')
+if not os.path.exists(config_path):
+    config_path = os.path.join('data', 'config.example.json')
+    print(f"⚠️ Geen data/config.json gevonden, val terug op {config_path}")
+
+print(f"⚙️  Configuratie geladen uit: {config_path}")
 with open(config_path, 'r') as f:
     config = json.load(f)
 
