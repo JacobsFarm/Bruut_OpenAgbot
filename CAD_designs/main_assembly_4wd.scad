@@ -6,11 +6,16 @@ use <assemblies/chassis_frame_asm.scad>
 
 module bruut_agbot_full() {
     
-    // --- Auto-Grid Uitlijning ---
-    // Forceert de breedte en lengte naar een veelvoud van 80, 
-    // zodat de wielen altijd 100% uitlijnen met het 40mm gatenpatroon.
-    align_width = round(chassis_width / 80) * 80;
-    align_length = round(chassis_length / 80) * 80;
+    // --- Auto-Grid Uitlijning (Bulletproof) ---
+    // Zorgt ervoor dat het chassis en de wielen perfect op het modulaire gatenpatroon klikken.
+    // Omdat we vanuit het midden werken, is de stapgrootte altijd (2 * grid_step).
+    // We rekenen vanaf de minimumafmetingen zodat de offset altijd 100% klopt.
+    
+    stappen_x = round((chassis_width - chassis_width_min) / (2 * grid_step));
+    align_width = chassis_width_min + (stappen_x * (2 * grid_step));
+
+    stappen_y = round((chassis_length - chassis_length_min) / (2 * grid_step));
+    align_length = chassis_length_min + (stappen_y * (2 * grid_step));
 
     // 1. Plaats de 4 wielunits op de hoeken
     for(x_pos = [-align_width/2, align_width/2]) {
@@ -25,8 +30,8 @@ module bruut_agbot_full() {
         chassis_beam_construct_asm();
     }
     
-    // 3. Plaats het chassis frame (40 mm hoger)
-    translate([0, 0, 40]) {
+    // 3. Plaats het chassis frame (dynamisch verhoogd op basis van balk + bracket)
+    translate([0, 0, beam_profile + (bracket_thick / 2)]) {
         chassis_frame_asm();
     }
 }

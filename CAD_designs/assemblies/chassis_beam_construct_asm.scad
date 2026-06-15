@@ -1,32 +1,22 @@
-// chassis_beam_construct_asm.scad
-
 include <../config/parameters.scad>
 use <../parts/bracket_top_plate.scad>
 use <../parts/chassis_beam_1.scad>
 use <../parts/chassis_beam_2.scad>
 
-// --- Instellingen via parameters (standaard staat alles op true) ---
 module chassis_beam_construct_asm(
     toon_brackets = false, 
     toon_onderste_balken = true, 
     toon_bovenste_balken = true
 ) {
-    
-    // --- NIEUW: Auto-Grid Uitlijning ---
-    // Zorgt ervoor dat het chassis altijd perfect op het 40mm gatenpatroon klikt.
-    // Omdat we vanuit het midden (0) werken, moet de totale breedte een veelvoud van 80 zijn.
-    align_width = round(chassis_width / 80) * 80;   // Bijv: 750 wordt automatisch 720
-    align_length = round(chassis_length / 80) * 80; // Bijv: 1000 wordt automatisch 960
-
     // Z-hoogtes berekenen zodat de delen netjes op elkaar stapelen
     z_bracket_top = bracket_thick / 2;
     z_bottom_beams = z_bracket_top + (beam_profile / 2);
     z_top_beams = z_bottom_beams + beam_profile;
 
-    // 1. Plaats de 4 bracket_top_plates op de hoeken
+    // 1. Plaats de 4 bracket_top_plates direct op de hoeken
     if (toon_brackets) {
-        for (x = [-align_width/2, align_width/2]) {
-            for (y = [-align_length/2, align_length/2]) {
+        for (x = [-chassis_width/2, chassis_width/2]) {
+            for (y = [-chassis_length/2, chassis_length/2]) {
                 translate([x, y, 0])
                     color("darkgray") 
                     bracket_top_plate();
@@ -34,9 +24,9 @@ module chassis_beam_construct_asm(
         }
     }
 
-    // 2. Plaats de 4 onderste balken (Zijdelings / Breedte / X-as)
+    // 2. Plaats de 4 onderste balken (Breedte / X-as)
     if (toon_onderste_balken) {
-        for (y_center = [-align_length/2, align_length/2]) {
+        for (y_center = [-chassis_length/2, chassis_length/2]) {
             for (y_offset = [-bracket_top_hole_dist_y/2, bracket_top_hole_dist_y/2]) {
                 translate([0, y_center + y_offset, z_bottom_beams])
                     color("silver")
@@ -47,7 +37,7 @@ module chassis_beam_construct_asm(
 
     // 3. Plaats de 4 bovenste balken (Lengterichting / Y-as)
     if (toon_bovenste_balken) {
-        for (x_center = [-align_width/2, align_width/2]) {
+        for (x_center = [-chassis_width/2, chassis_width/2]) {
             for (x_offset = [-bracket_top_hole_dist_x/2, bracket_top_hole_dist_x/2]) {
                 translate([x_center + x_offset, 0, z_top_beams])
                     rotate([0, 0, 90])
@@ -58,13 +48,5 @@ module chassis_beam_construct_asm(
     }
 }
 
-// --- Previews testen ---
-
-// Alles tonen (gebruikt de standaard 'true' waarden)
+// Previews
 chassis_beam_construct_asm();
-
-// Voorbeeld: Alleen de onderste balken en brackets tonen (haal de '//' weg om te testen)
-// chassis_beam_construct_asm(toon_bovenste_balken = false);
-
-// Voorbeeld: Alleen de bovenste balken tonen (haal de '//' weg om te testen)
-// chassis_beam_construct_asm(toon_brackets = false, toon_onderste_balken = false);

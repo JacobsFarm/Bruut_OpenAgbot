@@ -1,31 +1,28 @@
 // Global Chassis Dimensions
-chassis_width = 720; //kies een veelvoud van 80  
-chassis_length = 1040; //kies een veelvoud van 80
+chassis_width = 750; //kies een veelvoud van 50  
+chassis_length = 1000; //kies een veelvoud van 50
 
 // --- Modulair Gatenpatroon (Grid) ---
-grid_step = 40; // Universele stapgrootte voor alle gaten
+grid_step = 50; // Universele stapgrootte voor alle gaten
 
 // --- Bereiken (Ranges) voor de Robot Afmetingen ---
 // Bereik voor de BREEDTE 
-chassis_width_min = 560;
-chassis_width_max = 800;
-chassis_width_step = 80; // Stapgrootte voor instelbare breedte
+chassis_width_min = 550;
+chassis_width_max = 850;
 
 // Bereik voor de LENGTE 
-chassis_length_min = 720;
-chassis_length_max = 1040;
-chassis_length_step = 80; // Stapgrootte voor instelbare lengte
+chassis_length_min = 700;
+chassis_length_max = 1100;
 
 // Bereik voor de BASE PLATE 
 base_length_min = 800;
-base_length_max = 1280;
-base_length_step = 80;
+base_length_max = 1300;
 
 // Beam Profile (Purchased Part)
 beam_profile = 40;
 beam_thickness = 2;    
 beam_length_1 = 1000;
-beam_length_2 = 1280;
+beam_length_2 = 1300;
 
 // Upright & Cover
 base_plate_length = 1300;
@@ -69,8 +66,8 @@ tab_offset_y = 40;       // Positie vanaf het midden over de Y-as (uit elkaar)
 laser_tolerance = 1.0;   // Extra snijspeling zodat het makkelijk in elkaar schuift
 
 //top plate
-bracket_top_hole_dist_x = 80; // De totale gewenste afstand over de X-as
-bracket_top_hole_dist_y = 120; // De totale gewenste afstand over de Y-as
+bracket_top_hole_dist_x = 100; // De totale gewenste afstand over de X-as veelvoud van 50 maken
+bracket_top_hole_dist_y = 150; // De totale gewenste afstand over de Y-as veelvoud van 50 maken
 
 
 arm_height = (tire_dia / 2) + tire_clearance;

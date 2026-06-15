@@ -7,34 +7,27 @@ use <assemblies/chassis_frame_asm.scad>
 
 module bruut_agbot_full() {
     
-    // --- Auto-Grid Uitlijning ---
-    // Forceert de breedte en lengte naar een veelvoud van 80, 
-    // zodat de wielen altijd 100% uitlijnen met het 40mm gatenpatroon.
-    align_width = round(chassis_width / 80) * 80;
-    align_length = round(chassis_length / 80) * 80;
-    
     // ==========================================
     // --- ONAFHANKELIJKE ZWENKWIELEN (VOOROP) ---
     // Pas de X, Y en Z in de translate aan 
     // om de voorste wielen vrij te verplaatsen.
     // ==========================================
     
-    // 1. Zwenkwiel Linksvoor
-    translate([-align_width/2 - 40, align_length/2 + 220, 0]) {
+    // 1. Zwenkwiel Linksvoor (Nu verplaatst in veelvouden van 50mm)
+    translate([-chassis_width/2 - 50, chassis_length/2 + 275, 0]) {
         rotate([0, 0, 180]) 
             caster_wheel_asm();
     }
 
-    // 2. Zwenkwiel Rechtsvoor
-    translate([align_width/2 + 40, align_length/2 + 220, 0]) {
+    // 2. Zwenkwiel Rechtsvoor (Nu verplaatst in veelvouden van 50mm)
+    translate([chassis_width/2 + 50, chassis_length/2 + 200, 0]) {
         rotate([0, 0, 180]) 
             caster_wheel_asm();
     }
-
     
     // 3. Aandrijfwielen (hubmotors) Links & Rechts achter
-    for(x_pos = [-align_width/2, align_width/2]) {
-        translate([x_pos, -align_length/2, 0])
+    for(x_pos = [-chassis_width/2, chassis_width/2]) {
+        translate([x_pos, -chassis_length/2, 0])
             wheel_unit_asm();
     }
     
@@ -45,8 +38,8 @@ module bruut_agbot_full() {
         chassis_beam_construct_asm();
     }
     
-    // 5. Plaats het chassis frame (40 mm hoger)
-    translate([0, 0, 40]) {
+    // 5. Plaats het chassis frame (dynamisch verhoogd zodat het exact óp de kokers ligt)
+    translate([0, 0, beam_profile + (bracket_thick / 2)]) {
         chassis_frame_asm();
     }
 }

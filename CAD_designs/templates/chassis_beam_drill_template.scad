@@ -1,7 +1,7 @@
 // ==========================================
 // LOCAL TEMPLATE CONFIG
 // ==========================================
-tpl_length = 280;        // Lengte van de mal (280mm dekt alle gaten aan 1 kant)
+tpl_length = 150;        // Lengte van de mal (280mm dekt alle gaten aan 1 kant)
 tpl_thickness = 5;       // Dikte van de 3D-geprinte wanden
 tpl_clearance = 0.5;     // Extra tolerantie zodat de mal over de koker glijdt
 tpl_side_height = 25;    // Hoogte van de zijmuren en achterkant (zoals gevraagd)
@@ -51,19 +51,18 @@ module drill_template_sleeve() {
         }
         
         // --- 2. GATEN VAN DE CHASSIS_BEAM UITKNIPPEN ---
-        // Genereert automatisch de gaten op de correcte positie uit de loop
-        gewenste_breedtes = [chassis_width_min : chassis_width_step : chassis_width_max];
-        for(optie_width = gewenste_breedtes) { 
-            for(x_dir = [-1, 1]) {
-                module_center_x = x_dir * (optie_width / 2);
-                for(bx = [-1, 1]) {
-                    hole_x = module_center_x + (bx * (bracket_top_hole_dist_x / 2));
-                    
-                    // Knip gat uit de bovenplaat
-                    translate([hole_x, 0, z_top_center])
-                        cylinder(d=bolt_dia, h=tpl_thickness + 10, center=true, $fn=64);
-                }
-            }
+        // Genereert gaten volgens het modulaire grid patroon (grid_step)
+        min_hole_x = (chassis_width_min / 2) - (bracket_top_hole_dist_x / 2);
+        max_hole_x = (chassis_width_max / 2) + (bracket_top_hole_dist_x / 2);
+
+        for(x = [min_hole_x : grid_step : max_hole_x]) { 
+            // Knip gaten uit de rechterkant
+            translate([x, 0, z_top_center])
+                cylinder(d=bolt_dia, h=tpl_thickness + 10, center=true, $fn=64);
+            
+            // Knip gaten uit de linkerkant (spiegeling)
+            translate([-x, 0, z_top_center])
+                cylinder(d=bolt_dia, h=tpl_thickness + 10, center=true, $fn=64);
         }
     }
 }
