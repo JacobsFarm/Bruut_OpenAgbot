@@ -43,9 +43,12 @@ class ABNavigator:
         # Navigatie-instellingen (met config-fallback)
         nav_cfg = config.get("navigation", {})
         self.lookahead_m = nav_cfg.get("lookahead_distance_m", 2.5)
-        self.turn_wp_threshold_m = nav_cfg.get("arrival_threshold_intermediate_m", 0.6)
         self.turn_speed_kmh = nav_cfg.get("turn_speed_kmh", 2.0)
         self.max_swaths = nav_cfg.get("max_swaths", 1000)
+        # Kopakker-bocht: stop de bocht als de koers binnen deze tolerantie van de
+        # volgende baanrichting ligt; de timeout voorkomt eindeloos rondjes draaien.
+        self.turn_heading_tol_deg = nav_cfg.get("turn_heading_tolerance_deg", 8.0)
+        self.turn_timeout_s = nav_cfg.get("turn_timeout_s", 40.0)
 
         # Missie-parameters (gezet via start_mission)
         self.work_width_m = 4.0
@@ -65,8 +68,11 @@ class ABNavigator:
         self.state = "IDLE"              # IDLE | TRACKING | TURNING
         self.current_swath = 0
         self.pass_start_along = None     # langs-afstand bij start van huidige baan
-        self.turn_waypoints = []         # lijst {"lat","lon"} voor de kopakker-bocht
-        self.turn_wp_index = 0
+        # Kopakker-bocht (vaste-boog met heading-feedback)
+        self.turn_target_bearing = 0.0   # koers van de volgende baan
+        self.turn_steer = 0.0            # vaste stuurhoek tijdens de bocht (+ = rechts)
+        self.turn_start_heading = 0.0
+        self.turn_start_time = 0.0
 
     # ------------------------------------------------------------------ #
     #  Publieke API (gebruikt door endpoints.py)
@@ -110,19 +116,30 @@ class ABNavigator:
 
         self.current_swath = 0
         self.pass_start_along = None
-        self.turn_waypoints = []
-        self.turn_wp_index = 0
         self.state = "TRACKING"
 
         if self.drive_logger:
             self.drive_logger.start_nieuwe_rit(navigatie_modus="AB_Missie")
+
+        # Minimale draaicirkel uit de hardware (driewieler, 1 gestuurd voorwiel):
+        # R_min = wielbasis / tan(max stuurhoek). Een 180-graden kopakkerbocht
+        # verplaatst de robot 2*R_min zijwaarts; is de werkbreedte kleiner, dan
+        # kan hij niet in één halve cirkel op de volgende baan landen.
+        min_radius = self.wheelbase / math.tan(math.radians(self.max_angle))
+        if self.work_width_m < 2.0 * min_radius:
+            self.logger.warning(
+                f"Werkbreedte {self.work_width_m:.2f} m < min. bochtbreedte "
+                f"{2.0 * min_radius:.2f} m (R_min={min_radius:.2f} m). De bocht "
+                f"overschiet naar rechts; cross-track correctie trekt terug op lijn."
+            )
 
         self.is_active = True
         self.nav_thread = threading.Thread(target=self._navigation_loop, daemon=True)
         self.nav_thread.start()
         self.logger.info(
             f"AB-missie gestart: werkbreedte={self.work_width_m} m, "
-            f"baanlengte={self.field_length_m} m, snelheid={self.target_speed_kmh} km/h."
+            f"baanlengte={self.field_length_m} m, snelheid={self.target_speed_kmh} km/h, "
+            f"min. draaicirkel R={min_radius:.2f} m."
         )
 
     def stop(self):
@@ -193,9 +210,8 @@ class ABNavigator:
                 self.logger.info("Maximaal aantal banen bereikt. Missie klaar.")
                 self.stop()
                 return
-            self._plan_turn(along, offset, sign)
+            self._plan_turn(curr_pos)
             self.state = "TURNING"
-            self.turn_wp_index = 0
             return
 
         # Carrot-punt: op de baanlijn, 'lookahead' meter vooruit.
@@ -221,70 +237,78 @@ class ABNavigator:
             )
 
     # ------------------------------------------------------------------ #
-    #  TURNING: volg de gegenereerde kopakker-bocht (waypoint pure pursuit)
+    #  TURNING: vaste-boog kopakker-bocht met heading-feedback
     # ------------------------------------------------------------------ #
     def _handle_turning(self, curr_pos):
-        if self.turn_wp_index >= len(self.turn_waypoints):
-            # Bocht klaar: volgende baan oppakken.
+        heading = curr_pos["heading"]
+
+        # Hoeveel is de koers nog verwijderd van de volgende baanrichting?
+        rest = abs(self._norm180(self.turn_target_bearing - heading))
+        # Hoeveel is hij al gedraaid sinds het begin van de bocht?
+        gedraaid = abs(self._norm180(heading - self.turn_start_heading))
+        timeout = (time.time() - self.turn_start_time) > self.turn_timeout_s
+
+        # Bocht klaar: koers ligt op de nieuwe baan (na min. 120° gedraaid),
+        # of de veiligheids-timeout grijpt in (voorkomt eindeloos rondjes).
+        if (rest <= self.turn_heading_tol_deg and gedraaid >= 120.0) or timeout:
             self.current_swath += 1
             self.pass_start_along = None
             self.state = "TRACKING"
-            self.logger.info(f"Bocht klaar. Baan {self.current_swath} wordt opgepakt.")
+            if timeout:
+                self.logger.warning(
+                    f"Bocht-timeout ({self.turn_timeout_s:.0f}s) -> baan "
+                    f"{self.current_swath} wordt geforceerd opgepakt."
+                )
+            else:
+                self.logger.info(f"Bocht klaar. Baan {self.current_swath} wordt opgepakt.")
             return
 
-        wp = self.turn_waypoints[self.turn_wp_index]
-        dist = self._haversine(curr_pos["lat"], curr_pos["lon"], wp["lat"], wp["lon"])
-
-        # Bij dit bocht-punt aangekomen? Door naar het volgende.
-        if dist <= self.turn_wp_threshold_m:
-            self.turn_wp_index += 1
-            return
-
-        target_bearing = self._bearing(curr_pos["lat"], curr_pos["lon"], wp["lat"], wp["lon"])
-        steering = self._pure_pursuit_steer(target_bearing, curr_pos["heading"])
-        self.vehicle.drive(self.turn_speed_kmh, steering)
+        # Tijdens de bocht: constante stuurhoek (vaste draaicirkel) naar rechts.
+        self.vehicle.drive(self.turn_speed_kmh, self.turn_steer)
 
         if self.drive_logger:
             self.drive_logger.log_regel(
-                wp_idx=self.turn_wp_index, modus=self.state,
+                wp_idx=self.current_swath, modus=self.state,
                 lat=curr_pos["lat"], lon=curr_pos["lon"],
                 fix=curr_pos.get("fix", 0), hdop=curr_pos.get("hdop", 99.0),
-                heading_echt=curr_pos["heading"], heading_doel=target_bearing,
-                heading_fout=0.0, stuurhoek=steering, doel_kmh=self.turn_speed_kmh,
+                heading_echt=heading, heading_doel=self.turn_target_bearing,
+                heading_fout=rest, stuurhoek=self.turn_steer, doel_kmh=self.turn_speed_kmh,
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
                 dac_links=self.vehicle.current_dac_links,
                 dac_rechts=self.vehicle.current_dac_rechts,
-                dist_wp=dist, lookahead=self.lookahead_m, dt=0.1
+                dist_wp=gedraaid, lookahead=self.lookahead_m, dt=0.1
             )
 
-    def _plan_turn(self, along_end, offset, sign):
+    def _plan_turn(self, curr_pos):
         """
-        Genereer een halve cirkel naar RECHTS van de huidige baan naar de
-        volgende baan (offset + work_width), in omgekeerde rijrichting.
+        Plan een kopakker-bocht naar RECHTS met een vaste draaicirkel.
 
-        Het middelpunt ligt 'radius' naar rechts van het baan-eind; de bocht
-        bolt voorbij het veld-eind uit (de kopakker). Bij een te smalle
-        werkbreedte wordt de minimale (fysieke) draaicirkel gebruikt; de
-        cross-track correctie van TRACKING trekt de robot daarna alsnog op lijn.
+        We rijden met een constante stuurhoek (radius ~ werkbreedte/2, of de
+        minimale fysieke draaicirkel) tot de koers ~180 graden is omgedraaid en
+        op de richting van de volgende baan ligt. Open-loop op positie, maar
+        closed-loop op koers: dit kan - anders dan waypoint-volgen - niet in een
+        oneindige cirkel blijven hangen. De cross-track correctie van TRACKING
+        trekt de robot daarna netjes op de nieuwe lijn.
         """
+        # Radius -> stuurhoek (Ackermann). Naar RECHTS = positieve stuurhoek
+        # (zelfde conventie als de pure-pursuit tracking).
         min_radius = self.wheelbase / math.tan(math.radians(self.max_angle))
         radius = max(min_radius, self.work_width_m / 2.0)
+        steer = math.degrees(math.atan2(self.wheelbase, radius))
+        self.turn_steer = max(-self.max_angle, min(self.max_angle, steer))
 
-        along_c = along_end                 # middelpunt: zelfde langs-positie
-        right_c = offset + radius           # middelpunt naar rechts van baan-eind
+        # Richting van de volgende baan (omgekeerd t.o.v. de huidige).
+        next_swath = self.current_swath + 1
+        forward = self.base_bearing_deg if (next_swath % 2 == 0) else self.base_bearing_deg + 180.0
+        self.turn_target_bearing = forward % 360.0
 
-        n_points = max(6, int(math.pi * radius / 0.5))
-        self.turn_waypoints = []
-        for i in range(1, n_points + 1):
-            theta = math.pi * i / n_points          # 0 -> pi
-            a = along_c + sign * radius * math.sin(theta)
-            r = right_c - radius * math.cos(theta)  # offset -> offset + 2*radius
-            lat, lon = self._local_to_latlon(a, r)
-            self.turn_waypoints.append({"lat": lat, "lon": lon})
+        self.turn_start_heading = curr_pos["heading"]
+        self.turn_start_time = time.time()
 
         self.logger.info(
-            f"Kopakker-bocht gepland: {len(self.turn_waypoints)} punten, "
-            f"radius {radius:.2f} m, naar baan {self.current_swath + 1}."
+            f"Kopakker-bocht (vaste boog): radius {radius:.2f} m, stuurhoek "
+            f"{self.turn_steer:.1f} graden, doelkoers {self.turn_target_bearing:.1f} graden "
+            f"naar baan {next_swath}."
         )
 
     # ------------------------------------------------------------------ #
@@ -293,6 +317,11 @@ class ABNavigator:
     def _pass_sign(self):
         """+1 voor even banen (basisrichting), -1 voor oneven (omgekeerd)."""
         return 1.0 if (self.current_swath % 2 == 0) else -1.0
+
+    @staticmethod
+    def _norm180(deg):
+        """Normaliseer een hoekverschil naar -180 .. +180 graden."""
+        return (deg + 180.0) % 360.0 - 180.0
 
     def _pure_pursuit_steer(self, target_bearing_deg, heading_deg):
         alpha = (target_bearing_deg - heading_deg + 180.0) % 360.0 - 180.0
