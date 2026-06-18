@@ -1,0 +1,60 @@
+UVC Cameras on NVIDIA Jetson: Integration, Compatibility, and What to Check
+Gaspar van Elmbt
+
+UVC cameras on NVIDIA Jetson are a practical option when you want standard USB camera integration for embedded vision, robotics, and OEM systems. In Jetson documentation, USB UVC cameras are placed on the V4L2 path, while NVIDIA’s libargus and nvarguscamerasrc path is used for CSI cameras that use the Jetson ISP. 
+
+Important: On this page, UVC means USB Video Class, not UV or UV-C imaging.
+UVC Cameras on NVIDIA Jetson: Integration, Compatibility, and What to Check
+What is a UVC camera on NVIDIA Jetson?
+
+An industrial UVC camera on NVIDIA Jetson is a USB camera that follows the USB Video Class standard and is typically handled through the Linux Video4Linux2 (V4L2) interface on Jetson. NVIDIA’s camera API matric explicitly lists USB (UVC) under V4L2, not under the Argus/ISP route.
+
+That matters because it tells developers where UVC fits in the Jetson software stack. A UVC camera on Jetson is generally treated as a standard Linux USB video device, which is often attractive when broad compatibility and faster integration are more important than building around a CSI-specific camera path.
+How does NVIDIA Jetson handle UVC cameras?
+
+NVIDIA Jetson handles UVC cameras through V4L2. In the Jetson camera architecture, NVIDIA identifies v4l2src as the standard Linux V4L2 application path, and its API matrix maps USB (UVC) cameras to V4L2.
+
+NVIDIA also states that using a USB camera to output YUV images without ISP processing does not use the NVIDIA camera software stack. In other words, the typical Jetson UVC workflow is separate from the Jetson ISP-centric path used for many CSI camera workflows.
+Do UVC cameras use Argus on Jetson?
+
+UVC cameras on Jetson generally do not use Argus for the normal USB camera workflow. NVIDIA documents libargus and nvarguscamerasrc for the camera core and ISP-oriented path, while USB (UVC) is mapped to V4L2.
+
+That is one of the most important distinctions to explain in this article. If a team expects a USB UVC camera to behave like a CSI camera that uses the Jetson ISP and Argus controls, they may choose the wrong software path from the start. On Jetson, UVC is usually the standard Linux camera route, not the Argus route.
+Why are UVC cameras attractive for NVIDIA Jetson projects?
+
+UVC cameras are attractive for NVIDIA Jetson projects
+because they can simplify integration. Since Jetson supports USB UVC cameras
+through V4L2, developers can build around a standard Linux camera path instead
+of starting with a fully custom camera stack. That can be especially useful in
+embedded vision, proof-of-concept builds, OEM devices, and robotics projects.
+
+They also fit well in workflows that combine camera capture
+with the accelerated processing. NVIDIA’s multimedia sample documentation
+includes a V4L2 YUV camera example that shares the image stream with CUDA,
+which shows that V4L2-based camera capture can still play a useful role in
+Jetson vision pipelines.
+What should you check before choosing a UVC camera for NVIDIA Jetson?
+
+Before choosing a UVC camera for NVIDIA Jetson, you should check the camera fits the V4L2-based software path, the required pixel format, and the real resolution and frame-rate target of the application. NVIDIA’s own USB camera examples on Jetson are built around V4L2 and specific YUV-style formats, which means compatibility is not only about the USB connector but also about the format and the pipeline you want to use.
+
+You should also check which controls your application actually needs. A UVC camera may stream correctly, but advanced controls, compressed formats, or application-specific behavior still need to be validated in the target Jetson environment, that is an engineering inference from NVIDIA’s documented split between the V4L2 path and the Argus/ISP path.
+What are the main limitations of UVC cameras on Jetson?
+
+The main limitation of a UVC camera on Jetson is that it does not follow the same path as a CSI camera using Jetson’s Argus and ISP stack. NVIDIA explicitly separates those paths in its camera architecture and notes that USB camera output without ISP processing does not use the NVIDIA camera software stack.
+
+That does not make UVC a poor choice. It simply means the selection criteria are different. If your project values standard USB integration, UVC can be a strong fit. If your project depends on a CSI-specific pipeline, ISP tuning, or a workflow built around Argus, you should evaluate those requirements early rather than assuming all Jetson camera paths are the same.
+How do you evaluate performance on Jetson?
+
+You should evaluate Jetson performance at system level, not just at camera level. NVIDIA provides the tegrastats utility to report memory and processor usage on Jetson-based devices, which is useful when you want to see whether the bottleneck is in the camera path, the host, or the rest of the application.
+
+In practice, that means checking the full chain: camera format, capture path, conversion steps, inference load, memory pressure, and thermal behavior. A UVC camera may be fully compatible with Jetson and still underperform in a real application if the total pipeline is heavier than the platform can sustain. That is an inference supported by NVIDIA’s separation of camera paths and its inclusion of Jetson performance-monitoring tools.
+When is a UVC camera a good fit for NVIDIA Jetson?
+
+A UVC camera is a good fit for NVIDIA Jetson when the project needs standard USB connectivity, simpler camera brin-up, and a Linux/V4L2-based workflow. That is often the case in embedded virion prototypes, OEM integrations, lab systems, robotics platforms, and compact AI devices where fast validation matters.
+
+It is less about whether Jetson can see a USB camera at all, and more about whether the UVC camera matches the software path and feature set your product needs. That is the real selection question for most embedded developers and product teams.
+Conclusion
+
+UVC cameras on NVIDIA Jetson are often a strong choice when you want a practical USB camera path for embedded vision. the key point is that Jetson treats USB UVC cameras as V4L2 devices, while Argus and nvarguscamerasrc are used for different camera workflows built around the Jetson ISP.
+
+For product teams, that distinction makes selection easier. If you need standard USB camera integration and a Linux-style capture path, UVC is often worth evaluating first. If you need a different camera architecture, make that decision early so the hardware and software stack stay aligned.
