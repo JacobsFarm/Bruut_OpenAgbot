@@ -24,9 +24,10 @@ class ABNavigator:
                  van de lijn. Staat A == B (of liggen ze vlak bij elkaar), dan
                  wordt de baanrichting afgeleid uit de huidige neus-richting
                  (GPS-heading) en de huidige positie.
-      2. EIND  : draai aan het eind een halve cirkel naar RECHTS (kopakker-bocht)
-                 en pak de volgende baan op, 'work_width' meter naar rechts en in
-                 omgekeerde rijrichting.
+      2. EIND  : draai aan het eind een halve cirkel (kopakker-bocht) en pak de
+                 volgende baan op, 'work_width' meter opzij en in omgekeerde
+                 rijrichting. De draairichting wisselt per baan (rechts, links,
+                 rechts, ...) zodat de banen steeds dezelfde kant op opschuiven.
     """
 
     def __init__(self, gps_system, vehicle_controller, config):
@@ -295,7 +296,13 @@ class ABNavigator:
         min_radius = self.wheelbase / math.tan(math.radians(self.max_angle))
         radius = max(min_radius, self.work_width_m / 2.0)
         steer = math.degrees(math.atan2(self.wheelbase, radius))
-        self.turn_steer = max(-self.max_angle, min(self.max_angle, steer))
+        steer = max(-self.max_angle, min(self.max_angle, steer))
+
+        # Boustrophedon: de draairichting MOET per baan wisselen, anders pendelt
+        # de robot tussen twee posities i.p.v. steeds een werkbreedte op te
+        # schuiven. Even baan -> rechtsbocht (+), oneven baan -> linksbocht (-).
+        turn_dir = self._pass_sign()
+        self.turn_steer = turn_dir * steer
 
         # Richting van de volgende baan (omgekeerd t.o.v. de huidige).
         next_swath = self.current_swath + 1
@@ -305,10 +312,11 @@ class ABNavigator:
         self.turn_start_heading = curr_pos["heading"]
         self.turn_start_time = time.time()
 
+        richting = "rechts" if self.turn_steer >= 0 else "links"
         self.logger.info(
-            f"Kopakker-bocht (vaste boog): radius {radius:.2f} m, stuurhoek "
-            f"{self.turn_steer:.1f} graden, doelkoers {self.turn_target_bearing:.1f} graden "
-            f"naar baan {next_swath}."
+            f"Kopakker-bocht (vaste boog) naar {richting}: radius {radius:.2f} m, "
+            f"stuurhoek {self.turn_steer:.1f} graden, doelkoers "
+            f"{self.turn_target_bearing:.1f} graden naar baan {next_swath}."
         )
 
     # ------------------------------------------------------------------ #

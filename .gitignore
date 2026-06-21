@@ -54,7 +54,7 @@ data/**/*
 !.gitkeep
 !data/config.example.json 
 !data/ab_line.example.json 
-
+!data/waypoints.example.json 
 
 # Negeer alle inhoud van de weights folder
 weights/**/*

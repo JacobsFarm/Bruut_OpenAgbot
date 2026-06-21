@@ -1,0 +1,48 @@
+{
+  "cameraSpecifications": {
+    "partNumber": "VEN-161-61U3C-M01",
+    "interface": "USB3 Vision",
+    "resolution": "1440x1080",
+    "frameRateFps": 61,
+    "pixelSizeUm": 3.45,
+    "colorMono": "Color",
+    "sensorType": "IMX296",
+    "sensorSize": "1/2.9\"",
+    "shutterType": "Global Shutter",
+    "shutterTime": "52us~1s",
+    "adcBitDepth": "10bit",
+    "pixelBitDepth": [
+      "8bit",
+      "10bit"
+    ],
+    "digitalGain": "0dB~24dB",
+    "pixelDataFormat": [
+      "Bayer RG8",
+      "Bayer RG10"
+    ],
+    "synchronization": [
+      "Hardware trigger",
+      "software trigger"
+    ],
+    "io": "1 input + 1 GPIO (Input or Output)",
+    "operatingTemp": "0°C~45°C",
+    "operatingHumidity": "10%~80%",
+    "mount": "S/C",
+    "dimensions": "35x35x15.2mm (CS/M12) 32.5x32.5x8.1mm (no housing)",
+    "sdkSoftware": [
+      "Windows",
+      "Linux",
+      "Android"
+    ],
+    "powerConsumption": "<2.7W@5V",
+    "weightGrams": 32,
+    "conformity": [
+      "RoHS",
+      "CE",
+      "FCC",
+      "USB3 Vision",
+      "Genicam"
+    ],
+    "megapixel": 2
+  }
+}

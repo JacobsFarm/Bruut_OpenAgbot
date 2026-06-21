@@ -2,8 +2,18 @@ import cv2
 import threading
 import time
 import os
+import queue
 from datetime import datetime
 from ultralytics import YOLO
+
+try:
+    import gxipy as gx
+except ImportError:
+    gx = None
+
+# Maximaal aantal gebufferde frames voor de gx camera.
+# Bij 15 fps = max 200ms latency voordat de queue geleegd wordt.
+GX_QUEUE_MAX = 3
 
 # Importeer de nieuwe modules
 from app.vision.detection_logger import DetectionLogger
@@ -20,6 +30,8 @@ class VisionStreamer:
             self.stream_source = config['vision']['rtsp_streams'][0]
         elif self.camera_type == 'usb':
             self.stream_source = config['vision']['usb_camera']['index']
+        elif self.camera_type == 'gx':
+            self.stream_source = None  # gxipy gebruikt eigen device manager
         else:
             raise ValueError(f"Onbekend camera type: {self.camera_type}")
 
@@ -34,6 +46,7 @@ class VisionStreamer:
         self.latest_annotated_frame = None
         self.running = False
         self.lock = threading.Lock()
+        self.gx_frame_queue = queue.Queue(maxsize=GX_QUEUE_MAX)
         
         # --- NIEUW: Snapshot map aanmaken en timer instellen ---
         self.snapshot_dir = os.path.join("data", "snapshot")
@@ -46,33 +59,91 @@ class VisionStreamer:
         threading.Thread(target=self._inference_loop, daemon=True).start()
 
     def _capture_loop(self):
+        if self.camera_type == 'gx':
+            self._capture_loop_gx()
+        else:
+            self._capture_loop_cv()
+
+    def _capture_loop_gx(self):
+        if gx is None:
+            print("[VISION] gxipy niet geïnstalleerd. Kan Daheng camera niet starten.")
+            return
+
+        cfg = self.config['vision']['gx_camera']
+        interval = 1.0 / cfg.get('fps', 15)
+
+        print("[VISION] Verbinden met Daheng (gxipy) camera...")
+        device_manager = gx.DeviceManager()
+        num, _ = device_manager.update_device_list()
+        if num == 0:
+            print("[VISION] Geen Daheng camera gevonden. Controleer USB aansluiting.")
+            return
+
+        cam = device_manager.open_device_by_index(cfg.get('index', 1))
+
+        cam.ExposureAuto.set(gx.GxAutoEntry.CONTINUOUS)
+        cam.AutoExposureTimeMax.set(cfg.get('exposure_max_us', 500))
+        cam.AutoExposureTimeMin.set(cfg.get('exposure_min_us', 100))
+        cam.GainAuto.set(gx.GxAutoEntry.CONTINUOUS)
+        cam.AutoGainMax.set(cfg.get('gain_max_db', 16))
+        cam.AutoGainMin.set(cfg.get('gain_min_db', 0))
+        cam.BalanceWhiteAuto.set(gx.GxAutoEntry.ONCE)
+
+        cam.stream_on()
+        print(f"[VISION] Daheng camera gestart op {cfg.get('fps', 15)} fps.")
+
+        while self.running:
+            start = time.time()
+            raw = cam.data_stream[0].get_image()
+            if raw is None:
+                continue
+
+            rgb = raw.convert("RGB")
+            img = rgb.get_numpy_array()
+            frame = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+            # Queue vol = inference kan GPU-piek niet bijhouden: gooi oude frames weg
+            # zodat de inference altijd een recente frame krijgt.
+            if self.gx_frame_queue.full():
+                try:
+                    self.gx_frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+            try:
+                self.gx_frame_queue.put_nowait(frame)
+            except queue.Full:
+                pass
+
+            verstreken = time.time() - start
+            wacht = interval - verstreken
+            if wacht > 0:
+                time.sleep(wacht)
+
+        cam.stream_off()
+        cam.close_device()
+
+    def _capture_loop_cv(self):
         print(f"[VISION] Verbinden met camera of video bron: {self.stream_source}")
-        
-        # Lees het besturingssysteem uit de config (standaard 'linux' als het er niet staat)
+
         os_type = self.config.get('system', {}).get('os', 'linux').lower()
-        
-        # Voor Windows en USB camera's gebruiken we DirectShow (DSHOW) voor de 100 fps
+
         if self.camera_type == 'usb' and os_type == 'windows':
             print("[VISION] Windows gedetecteerd in config: DirectShow wordt gebruikt.")
             cap = cv2.VideoCapture(self.stream_source, cv2.CAP_DSHOW)
         else:
             cap = cv2.VideoCapture(self.stream_source)
-        
-        # Als het een USB camera is, forceer dan de resolutie en framerate
+
         if self.camera_type == 'usb':
-            # Gebruik het MJPG format (noodzakelijk voor 100fps via USB 2.0)
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config['vision']['usb_camera']['width'])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config['vision']['usb_camera']['height'])
             cap.set(cv2.CAP_PROP_FPS, self.config['vision']['usb_camera']['fps'])
-            
-            # Lees ter controle terug wat de camera daadwerkelijk geaccepteerd heeft
+
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             print(f"[VISION] USB Camera succesvol geconfigureerd op: {w}x{h} @ {fps} FPS")
 
-        # Bepaal of het een videobestand is (alleen relevant bij RTSP of lokale string)
         is_video_bestand = False
         if isinstance(self.stream_source, str):
             is_video_bestand = ".mp4" in self.stream_source.lower()
@@ -82,27 +153,30 @@ class VisionStreamer:
             if ret:
                 with self.lock:
                     self.latest_frame = frame
-                
-                # Als het een lokaal bestand is, bouw een kleine vertraging in 
+
                 if is_video_bestand:
-                    time.sleep(0.033) 
+                    time.sleep(0.033)
             else:
-                # Geen beeld ontvangen?
                 if is_video_bestand:
-                    # Video is afgelopen! Spoel terug naar het begin
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 else:
-                    # Camera hapering of losgekoppeld, wacht even
                     time.sleep(0.1)
-                    
+
         cap.release()
 
     def _inference_loop(self):
         while self.running:
             frame_to_process = None
-            with self.lock:
-                if self.latest_frame is not None:
-                    frame_to_process = self.latest_frame.copy()
+
+            if self.camera_type == 'gx':
+                try:
+                    frame_to_process = self.gx_frame_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+            else:
+                with self.lock:
+                    if self.latest_frame is not None:
+                        frame_to_process = self.latest_frame.copy()
 
             if frame_to_process is not None:
                 frame_hoogte, frame_breedte = frame_to_process.shape[:2]

@@ -40,9 +40,17 @@
     "pass": "centipede"
   },
   "vision": {
-    "camera_type": "usb",
+    "camera_type": "gx",
+    "gx_camera": {
+      "index": 1,
+      "fps": 15,
+      "exposure_min_us": 100,
+      "exposure_max_us": 500,
+      "gain_min_db": 0,
+      "gain_max_db": 16
+    },
     "usb_camera": {
-      "index": 0, 
+      "index": 0,
       "width": 800,
       "height": 600,
       "fps": 100
