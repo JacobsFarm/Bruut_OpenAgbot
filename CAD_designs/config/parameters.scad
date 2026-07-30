@@ -50,7 +50,8 @@ bolt_dia = 14.2;
 
 // Bracket Geometry universal
 bracket_thick = 4;
-bracket_bolt_diameter = 10.4; //dikte van de gaten van gaten van de wiel_bracket     
+bracket_bolt_diameter = 10.4; //dikte van de gaten van gaten van de wiel_bracket  
+bracket_m8_bolt_diameter = 8.4; //dikte van de gaten van m8 bout  
 tire_clearance = 130;      
 side_plate_top_width = 240;
 side_plate_width = 240;
@@ -68,7 +69,7 @@ laser_tolerance = 1.0;   // Extra snijspeling zodat het makkelijk in elkaar schu
 //top plate
 bracket_top_hole_dist_x = 100; // De totale gewenste afstand over de X-as veelvoud van 50 maken
 bracket_top_hole_dist_y = 150; // De totale gewenste afstand over de Y-as veelvoud van 50 maken
-
+bracket_top_hole_distance_centrum_holes = 50; //De afstand van centrum gat tot centrum gat in het hart
 
 arm_height = (tire_dia / 2) + tire_clearance;
 inner_width = hub_width;
