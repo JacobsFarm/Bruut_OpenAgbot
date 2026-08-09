@@ -13,7 +13,7 @@ m8_bolt_diameter = 8.4; //dikte van de gaten van m8 bout
 
 // --- Bereiken (Ranges) voor de Robot Afmetingen ---
 // Bereik voor de BREEDTE 
-chassis_width_min = 550;
+chassis_width_min = 350;
 chassis_width_max = 850;
 
 // Bereik voor de LENGTE 
