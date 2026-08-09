@@ -5,6 +5,12 @@ chassis_length = 1000; //kies een veelvoud van 50
 // --- Modulair Gatenpatroon (Grid) ---
 grid_step = 50; // Universele stapgrootte voor alle gaten
 
+// bolt diameters
+m12_bolt_diameter = 12.4; //dikte van de gaten van m12 bout
+m10_bolt_diameter = 10.4; //dikte van de gaten van m10 bout
+m8_bolt_diameter = 8.4; //dikte van de gaten van m8 bout  
+
+
 // --- Bereiken (Ranges) voor de Robot Afmetingen ---
 // Bereik voor de BREEDTE 
 chassis_width_min = 550;
@@ -85,7 +91,7 @@ axle_bracket_thickness = 4;
 axle_hole_diameter = 10.3; //Dikte van het gaten in de axle_bracket
 axle_hole_distance = 40; //hoogte vanaf de onderkant tot de wiel ophanging
 
-axle_flat_width = axle_dia; // Gebruikt 10.2 uit parameters 
+axle_flat_width = axle_dia; // Gebruikt 10.3 uit parameters 
 axle_round_dia = bolt_dia;  // Gebruikt 14.2 uit parameters
 
 // --- Caster Wheel Parameters ---  
