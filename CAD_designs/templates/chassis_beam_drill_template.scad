@@ -73,11 +73,11 @@ module drill_template_segment(seg_center_x, seg_length, with_endstop=false) {
         for(x = [min_hole_x : grid_step : max_hole_x]) {
             // Knip gaten uit de rechterkant
             translate([x, 0, z_top_center])
-                cylinder(d=m10_bolt_diameter, h=tpl_thickness + 10, center=true, $fn=64);
+                cylinder(d=m10_bolt_diameter + 0.1, h=tpl_thickness + 10, center=true, $fn=64);
 
             // Knip gaten uit de linkerkant (spiegeling)
             translate([-x, 0, z_top_center])
-                cylinder(d=m10_bolt_diameter, h=tpl_thickness + 10, center=true, $fn=64);
+                cylinder(d=m10_bolt_diameter + 0.1, h=tpl_thickness + 10, center=true, $fn=64);
         }
     }
 }
