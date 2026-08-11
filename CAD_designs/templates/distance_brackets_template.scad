@@ -8,9 +8,9 @@
 
 tpl_span_adjust  = 0;      // 0 = exact 140 mm. -0.2 voor speling, +0.2 voor lichte voorspanning
 tpl_clearance    = 0.3;    // Speling zodat de ronde kop in het asgat (10.2) valt
-tpl_tongue_extra = 0;      // Extra uitsteek voorbij de buitenkant van de zijplaat (0 = vlak)
+tpl_tongue_extra = 4;      // Extra uitsteek voorbij de buitenkant van de zijplaat (0 = vlak)
 
-tpl_web_height   = 35;     // Hoogte van de rug, gemeten vanaf het hart van de as naar beneden
+tpl_web_height   = 15;     // Hoogte van de rug, gemeten vanaf het hart van de as naar beneden
 tpl_web_width    = 20;     // Y-breedte van de rug tussen de platen => vormt de aanslag
 
 tpl_wing_width   = 80;     // Y-breedte van de vierkante vleugels
