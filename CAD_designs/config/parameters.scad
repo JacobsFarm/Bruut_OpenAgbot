@@ -51,7 +51,7 @@ tire_dia = 430;
 tire_width = 100;
 hub_dia = 160;
 hub_width = 140; //specs from Quinder are: Fork width for mounting: 138mm
-axle_dia = 10.2; //specs from Quinder are: Mounting hole: max 10.2mm
+axle_dia = 10.2; //specs from Quinder are: Mounting hole: max 10.2mm, zou iets strakker mogen naar 10.1mm, 10.2 nog wat spelling
 bolt_dia = 14.2;
 
 // Bracket Geometry universal
