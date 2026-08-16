@@ -18,11 +18,13 @@ AB_LIJNEN_FILE = 'data/ab_line.json'
 WAYPOINTS_FILE = 'data/waypoints.json'
 
 class ManualDriveCommand(BaseModel):
+    """Handbediening: rijsnelheid + draaien (-100% = links, +100% = rechts)."""
     speed_kmh: float
-    steering_percentage: float
+    turn_percentage: float
 
-class SteeringEnableCommand(BaseModel):
-    enable: bool
+class PivotCommand(BaseModel):
+    """Draaien op de plek (-100% = linksom, +100% = rechtsom)."""
+    turn_percentage: float
 
 class ABMissionCommand(BaseModel):
     work_width_m: float
@@ -109,6 +111,8 @@ def get_status():
         "current_wp": navigator.current_wp_index if navigator.is_active else 0,
         "current_swath": ab_navigator.current_swath if ab_navigator.is_active else 0
     })
+    pos.update(vehicle_controller.get_state())
+    pos.update(gps_system.get_diagnostics())
     return pos
 
 @router.get("/ab_lijnen")
@@ -124,23 +128,18 @@ def noodstop():
 @router.post("/nav/manual_drive")
 def manual_drive(cmd: ManualDriveCommand):
     stop_alle_navigatie()
-    max_angle = config.get("steering", {}).get("max_angle_degrees", 45.0)
-    actual_angle = (cmd.steering_percentage / 100.0) * max_angle
-    vehicle_controller.drive(cmd.speed_kmh, actual_angle)
-    return {"status": "driving"}
+    vehicle_controller.drive_manual(cmd.speed_kmh, cmd.turn_percentage)
+    return {"status": "driving", **vehicle_controller.get_state()}
 
-@router.post("/steering/enable")
-def toggle_steering(cmd: SteeringEnableCommand):
-    if cmd.enable:
-        vehicle_controller.stepper_steering.enable()
-    else:
-        vehicle_controller.stepper_steering.disable()
-    return {"status": "success"}
-
-@router.post("/steering/zero")
-def zero_steering():
-    vehicle_controller.stepper_steering.set_zero()
-    return {"status": "success"}
+@router.post("/nav/pivot")
+def pivot_op_de_plek(cmd: PivotCommand):
+    """
+    Draaien op de plek. Met vooruit-only hubmotoren wordt dit een pivot om het
+    stilstaande binnenwiel: de robot draait om een punt onder dat wiel.
+    """
+    stop_alle_navigatie()
+    vehicle_controller.drive_manual(0.0, cmd.turn_percentage)
+    return {"status": "pivoting", **vehicle_controller.get_state()}
 
 @router.post("/nav/start_ab")
 def start_ab_mission(cmd: ABMissionCommand):

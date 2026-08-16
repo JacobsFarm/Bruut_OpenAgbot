@@ -14,6 +14,11 @@ class Navigator:
     De 'Routeplanner en Chauffeur' van de AgBot.
     Volgt een lijst met GPS-waypoints via het Pure Pursuit algoritme.
     Geheel onafhankelijk van hardware-specifieke (DAC) logica.
+
+    Skid steer: het resultaat van pure pursuit is hier een KROMMING (1/m) en
+    geen stuurhoek. Een skid steer heeft geen stuurwiel en dus ook geen
+    wielbasis in de wiskunde: de VehicleController vertaalt de kromming zelf
+    naar een snelheidsverschil tussen links en rechts.
     """
     def __init__(self, gps_system, vehicle_controller, config):
         self.logger = logging.getLogger(__name__)
@@ -21,22 +26,29 @@ class Navigator:
             self.drive_logger = DriveLogger()
         else:
             self.drive_logger = None
-        
+
         # Geïnjecteerde modules
         self.gps = gps_system
         self.vehicle = vehicle_controller
-        
-        # Voertuig & Stuur parameters
-        self.wheelbase = config.get("vehicle", {}).get("wheelbase_m", 1.2)
-        steering_config = config.get("steering", {})
-        self.max_angle = steering_config.get("max_angle_degrees", 45.0)
-        
+
         # Pure Pursuit & Navigatie instellingen
         nav_config = config.get("navigation", {})
         self.lookahead_distance = nav_config.get("lookahead_distance_m", 2.0)
         self.arrival_threshold_inter = nav_config.get("arrival_threshold_intermediate_m", 0.6) # Tussen-waypoints
         self.arrival_threshold_final = nav_config.get("arrival_threshold_final_m", 0.3)        # Laatste waypoint
-        
+
+        # Staat het doel te ver naast onze neus, dan draaien we eerst op de
+        # plek. Pure pursuit is daar niet geschikt voor: bij een koersfout van
+        # bijna 180 graden wordt sin(alpha) juist weer klein en zou de robot
+        # rechtdoor gaan rijden. Draaien op de plek kan een skid steer wél.
+        self.spot_turn_threshold_deg = nav_config.get("spot_turn_threshold_deg", 60.0)
+        self.spot_turn_yaw_dps = nav_config.get("spot_turn_yaw_rate_dps", 25.0)
+
+        # De ZED-X20D levert positie en koers tot 25 Hz; de regellus mag dus
+        # sneller dan de 10 Hz van de oude opstelling.
+        self.loop_rate_hz = nav_config.get("loop_rate_hz", 20.0)
+        self.min_fix_quality = nav_config.get("min_fix_quality", 2)
+
         # Missie status
         self.waypoints = []
         self.current_wp_index = 0
@@ -97,11 +109,10 @@ class Navigator:
 
     def _navigation_loop(self):
         """
-        De hoofd-regellus (10 Hz). Berekent continu de positie, 
+        De hoofd-regellus. Berekent continu de positie,
         het volgende doel en de benodigde stuurcorrectie.
         """
-        rate_hz = 10.0
-        interval = 1.0 / rate_hz
+        interval = 1.0 / max(1.0, self.loop_rate_hz)
 
         try:
             self._run_loop(interval)
@@ -124,7 +135,7 @@ class Navigator:
             # 1. Haal de nieuwste (hybride) GPS data op
             curr_pos = self.gps.get_current_position()
 
-            if not curr_pos or curr_pos.get("lat") == 0.0 or curr_pos.get("fix", 0) < 2:
+            if not curr_pos or curr_pos.get("lat") == 0.0 or curr_pos.get("fix", 0) < self.min_fix_quality:
                 self.state = "WACHT_OP_FIX"
                 self.status_message = (
                     f"Wachten op RTK-fix (fix={curr_pos.get('fix', 0) if curr_pos else 0})"
@@ -132,6 +143,18 @@ class Navigator:
                 self.logger.warning("Wachten op goede GPS/RTK fix...")
                 self.vehicle.drive(0.0, 0.0) # Veiligheid: stop met rijden bij slecht signaal
                 time.sleep(0.5)
+                continue
+
+            # Zonder betrouwbare koers is elke stuurcorrectie een gok. Een skid
+            # steer heeft niets wat hem mechanisch rechthoudt, dus dan stoppen
+            # we liever. Met de ZED-X20D hoort dit zelden voor te komen: de
+            # moving baseline werkt ook zonder RTK-fix.
+            if not curr_pos.get("heading_geldig", True):
+                self.state = "WACHT_OP_KOERS"
+                self.status_message = "Wachten op geldige koers (THS)"
+                self.logger.warning("Geen geldige koers van de GNSS-ontvanger.")
+                self.vehicle.drive(0.0, 0.0)
+                time.sleep(0.2)
                 continue
 
             self.state = "RIJDEN"
@@ -164,36 +187,46 @@ class Navigator:
             # Alpha: De hoek tussen onze huidige neus en de lijn naar het doelpunt
             alpha = target_bearing - curr_heading
             alpha = (alpha + 180) % 360 - 180 # Normaliseer naar -180 tot +180 graden
-            
-            # Delta (Stuurhoek): pure pursuit formule -> atan2(2 * Wielbasis * sin(alpha), Lookahead)
-            alpha_rad = math.radians(alpha)
-            desired_steering_angle = math.degrees(
-                math.atan2(2.0 * self.wheelbase * math.sin(alpha_rad), self.lookahead_distance)
-            )
-            
-            # Beperk de hoek tot de fysieke limieten van het zwenkwiel
-            final_steering_angle = max(-self.max_angle, min(self.max_angle, desired_steering_angle))
-            
-            # 6. STUUR HET VOERTUIG AAN
-            # De VehicleController handelt het differentieel, smoothing en anti-stall af.
-            self.vehicle.drive(self.target_speed_kmh, final_steering_angle)
-            
+
+            if abs(alpha) > self.spot_turn_threshold_deg:
+                # Doel ligt (bijna) achter of ver opzij: eerst op de plek
+                # indraaien, daarna pas rijden.
+                yaw_dps = math.copysign(self.spot_turn_yaw_dps, alpha)
+                self.vehicle.turn_in_place(yaw_dps)
+                curvature = 0.0
+                self.status_message = f"Indraaien naar doel ({alpha:.0f}°)"
+            else:
+                # Kromming van de boog door robot en doelpunt:
+                #   kappa = 2 * sin(alpha) / lookahead   (+ = rechtsom)
+                # De VehicleController maakt hier een snelheidsverschil tussen
+                # links en rechts van, en remt af als de bocht te scherp wordt.
+                curvature = 2.0 * math.sin(math.radians(alpha)) / self.lookahead_distance
+                yaw_dps = math.degrees((self.target_speed_kmh / 3.6) * curvature)
+
+                # 6. STUUR HET VOERTUIG AAN
+                self.vehicle.drive_curvature(self.target_speed_kmh, curvature)
+
             # 7. LOGGING (Optioneel, overgenomen uit je oude code)
             if self.drive_logger:
                 try:
                     self.drive_logger.log_regel(
-                        wp_idx=self.current_wp_index, 
+                        wp_idx=self.current_wp_index,
                         modus=self.mode,
-                        lat=curr_lat, 
+                        lat=curr_lat,
                         lon=curr_lon,
-                        fix=curr_pos.get("fix", 0), 
+                        fix=curr_pos.get("fix", 0),
                         hdop=curr_pos.get("hdop", 99.0),
-                        heading_echt=curr_heading, 
+                        heading_echt=curr_heading,
                         heading_doel=target_bearing,
-                        heading_fout=alpha, 
-                        stuurhoek=final_steering_angle,
-                        doel_kmh=self.target_speed_kmh, 
+                        heading_fout=alpha,
+                        draai_dps=yaw_dps,
+                        kromming=curvature,
+                        doel_kmh=self.target_speed_kmh,
                         echt_kmh=curr_pos.get("speed_kmh", 0.0),
+                        dac_links=self.vehicle.current_dac_links,
+                        dac_rechts=self.vehicle.current_dac_rechts,
+                        snelheid_links=self.vehicle.current_speed_links,
+                        snelheid_rechts=self.vehicle.current_speed_rechts,
                         dist_wp=distance,
                         lookahead=self.lookahead_distance,
                         dt=(time.time() - start_time)

@@ -1,0 +1,71 @@
+{
+  "board": {
+    "naam": "ArduSimple simpleRTK 4 Dual",
+    "gnss_module": "u-blox ZED-X20D",
+    "type": "1 ontvanger, 2 antennes (moving baseline), 1 seriele datastroom",
+    "vervangt": "de oude opstelling met twee losse GNSS-borden op twee seriele poorten",
+    "minimum_firmware": "2.00",
+    "bronnen": [
+      "https://www.ardusimple.com/product/simplertk-4-dual/",
+      "https://www.ardusimple.com/user-guide-simplertk-4-dual/",
+      "https://www.ardusimple.com/how-to-configure-u-blox-zed-x20p/",
+      "https://www.u-blox.com/en/product/zed-x20d-module"
+    ]
+  },
+  "prestaties": {
+    "positie_nauwkeurigheid": "0.6 cm met RTK-correcties",
+    "positie_zonder_rtk": "circa 1.5 m standalone",
+    "max_update_rate_hz": 25,
+    "banden": "L1 / L2 / L5 / L6 + L-band",
+    "heading_nauwkeurigheid": {
+      "baseline_1m": "0.14 graden koers, 0.23 graden pitch/roll",
+      "baseline_5m": "0.03 graden koers, 0.05 graden pitch/roll"
+    },
+    "heading_zonder_rtk": "ja - de moving baseline tussen de twee antennes werkt ook zonder correcties; bij een wegvallende NTRIP-caster verlies je de centimeterpositie, niet de richting"
+  },
+  "antenne_opstelling": {
+    "master": "GPS1 - bepaalt de gerapporteerde positie, standaard ACHTER op de robot",
+    "slave": "GPS2 - standaard VOOR op de robot",
+    "baseline_minimaal_m": 0.5,
+    "baseline_aanbevolen_m": 1.0,
+    "baseline_deze_robot_m": 1.0,
+    "eisen": "twee identieke antennes met gelijke kabellengtes",
+    "koersdefinitie": "hoek met de klok mee vanaf True North, langs de lijn GPS1 -> GPS2",
+    "let_op": "staat de baseline niet in de rijrichting, corrigeer dat met gnss.heading_offset_deg in data/config.json"
+  },
+  "gebruikte_nmea_berichten": {
+    "GGA": "positie, fixkwaliteit (4 = RTK fixed, 5 = RTK float), HDOP, satellieten, hoogte",
+    "THS": "$GNTHS,<koers>,<status> - ware neus-richting uit de twee antennes. Status: A = geldige meting, E = geschat (dead reckoning), V/M/S = ongeldig. HOOFDBRON voor de koers.",
+    "VTG": "grondsnelheid en course over ground. Alleen terugval voor de koers - klopt niet tijdens zijwaarts slippen of draaien op de plek.",
+    "RMC": "reservebron voor de snelheid als VTG uitstaat"
+  },
+  "configuratiebestand": {
+    "bestand": "simpleRTK4_Optimum_FW210_Rover25HZ-00.ucf",
+    "toegepast_via": "u-center 2",
+    "let_op": "Dit is de ROVER-configuratie voor de simpleRTK4 OPTIMUM (ZED-X20P, EEN antenne). Hij bevat GEEN enkele heading-instelling. THS moet je er zelf bij zetten - zie 'aanvullend_zelf_instellen'.",
+    "gedecodeerde_instellingen": [
+      { "key": "0x30210001", "naam": "CFG-RATE-MEAS", "waarde": "40 ms", "betekenis": "25 Hz meetfrequentie" },
+      { "key": "0x10930006", "naam": "CFG-NMEA-HIGHPREC", "waarde": 1, "betekenis": "extra decimalen in lat/lon" },
+      { "key": "0x209100d4-d6", "naam": "CFG-MSGOUT-NMEA_ID_GST_UART1/UART2/USB", "waarde": 1, "betekenis": "GST aan (statistiek over de positiefout)" },
+      { "key": "0x209100c0-c2", "naam": "CFG-MSGOUT-NMEA_ID_GSA_UART1/UART2/USB", "waarde": 0, "betekenis": "GSA uit, bespaart bandbreedte op 25 Hz" },
+      { "key": "0x209100c5-c7", "naam": "CFG-MSGOUT-NMEA_ID_GSV_UART1/UART2/USB", "waarde": 0, "betekenis": "GSV uit, bespaart bandbreedte op 25 Hz" },
+      { "key": "0x40520001", "naam": "CFG-UART1-BAUDRATE", "waarde": 115200, "betekenis": "moet gelijk zijn aan hardware.gps_baudrate" },
+      { "key": "0x40530001", "naam": "CFG-UART2-BAUDRATE", "waarde": 115200, "betekenis": "tweede UART" },
+      { "key": "0x10310020", "naam": "CFG-SIGNAL-SBAS_ENA", "waarde": 0, "betekenis": "SBAS uit, gebruikelijk bij RTK" }
+    ],
+    "aanvullend_zelf_instellen": [
+      { "key": "0x209100e3", "naam": "CFG-MSGOUT-NMEA_ID_THS_UART1", "waarde": 1, "betekenis": "koers-zin aan op UART1 - ZONDER DIT GEEN HEADING" },
+      { "key": "0x209100e5", "naam": "CFG-MSGOUT-NMEA_ID_THS_USB", "waarde": 1, "betekenis": "koers-zin aan op USB - ZONDER DIT GEEN HEADING" },
+      { "key": "0x209100ca-ce", "naam": "CFG-MSGOUT-NMEA_ID_GLL_*", "waarde": 0, "betekenis": "optioneel: GLL uit, wordt niet gebruikt en kost bandbreedte op 25 Hz" }
+    ],
+    "controleer_na_het_flashen": [
+      "GGA en VTG moeten AAN blijven staan - het .ucf-bestand zet ze niet expliciet aan, het vertrouwt op de standaardinstellingen",
+      "Console view moet epochs op 40 ms tonen (25 per seconde). Staat er 1 seconde tussen, dan is CFG-RATE-MEAS niet toegepast; zet hem handmatig op 40 en sla op in BBR+Flash.",
+      "Er MOET een regel 'NMEA-Standard-THS' tussen staan. Zo niet: THS staat uit, of de tweede antenne (GPS2) heeft geen zicht op de hemel.",
+      "kijk op het dashboard of positie en koers allebei rond de 25 Hz binnenkomen en het aantal verminkte NMEA-zinnen laag blijft"
+    ]
+  },
+  "bandbreedte": {
+    "opmerking": "GGA + VTG + RMC + GLL + THS is ongeveer 290 bytes per meting; op 25 Hz is dat circa 7.3 kB/s, ofwel ruwweg 63% van een 115200 baud lijn. Komt er meer bij, verhoog dan de baudrate of zet ongebruikte zinnen uit."
+  }
+}

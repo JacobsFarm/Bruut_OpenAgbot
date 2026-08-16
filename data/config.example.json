@@ -3,41 +3,55 @@
     "os": "linux" 
   },
   "hardware": {
-    "gps_port": "/dev/ttyACM2",
-    "gps_heading_port": "/dev/ttyACM1",
-    "gps_baudrate": 115200, 
-    "arduino_dac_port": "/dev/ttyACM3", 
-    "arduino_dac_baudrate": 115200,
-    "arduino_stepper_port": "/dev/ttyACM0", 
-    "arduino_stepper_baudrate": 9600
+    "gps_port": "/dev/ttyACM0",
+    "gps_baudrate": 115200,
+    "arduino_dac_port": "/dev/ttyACM3",
+    "arduino_dac_baudrate": 115200
+  },
+  "gnss": {
+    "_uitleg": "ArduSimple simpleRTK4 Dual (u-blox ZED-X20D): 1 ontvanger, 2 antennes, 1 seriele poort. Koers komt uit NMEA THS (moving baseline GPS1->GPS2).",
+    "heading_offset_deg": 0.0,
+    "antenna_offset_forward_m": 0.0,
+    "antenna_offset_right_m": 0.0,
+    "heading_timeout_s": 1.0,
+    "vtg_fallback_min_kmh": 1.5,
+    "accept_estimated_heading": true
   },
   "vehicle": {
-    "wheelbase_m": 1.20,
-    "track_width_m": 1.00,
-    "max_wheel_diff_dac": 1000.0
-  },
-  "steering": {
-    "max_angle_degrees": 50.0,
-    "invert_direction": true
+    "track_width_m": 0.85,
+    "min_turn_radius_m": 0.85,
+    "max_yaw_rate_dps": 45.0
   },
   "motor_control": {
+    "speed_table_path": "setup/information/throttle_dac_speed_table.json",
     "dac_stop": 700,
     "dac_min_start": 1200,
     "dac_max": 3100,
-    "max_dac_step_per_sec": 800.0,
-    "smoothing_interval_sec": 0.05
+    "creep_threshold_mps": 0.12,
+    "max_accel_mps2": 0.6,
+    "max_decel_mps2": 1.5,
+    "smoothing_interval_sec": 0.05,
+    "command_timeout_sec": 2.0
   },
   "navigation": {
     "lookahead_distance_m": 3.0,
     "arrival_threshold_intermediate_m": 0.8,
-    "arrival_threshold_final_m": 0.8
+    "arrival_threshold_final_m": 0.8,
+    "turn_speed_kmh": 2.0,
+    "turn_heading_tolerance_deg": 8.0,
+    "turn_timeout_s": 40.0,
+    "spot_turn_threshold_deg": 60.0,
+    "spot_turn_yaw_rate_dps": 25.0,
+    "loop_rate_hz": 20.0,
+    "min_fix_quality": 2
   },
   "ntrip": {
     "host": "caster.centipede.fr",
     "port": 2101,
     "mountpoint": "NEAR",
     "user": "centipede",
-    "pass": "centipede"
+    "pass": "centipede",
+    "gga_interval_s": 10.0
   },
   "vision": {
     "camera_type": "gx",

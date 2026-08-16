@@ -11,7 +11,7 @@ agbot/
             ├── __init__.py
             ├── gps_logic.py
             ├── motor_logic.py
-            └── stepper_logic.py
+            └── throttle_map.py
         ├── services
             ├── __init__.py
             ├── ab_navigator.py
@@ -26,8 +26,7 @@ agbot/
             └── weed_tracker.py
         └── __init__.py
     ├── Arduino
-        ├── arduino_controlling_dac.cpp
-        └── arduino_controlling_steppercontroller.cpp
+        └── arduino_controlling_dac.cpp
     ├── CAD_designs
         ├── assemblies
             ├── caster_wheel_asm.scad

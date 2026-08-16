@@ -25,7 +25,8 @@ FILE_NAME = "rit_Waypoint_Route_20260614_210608.csv"
 # Kolommen zoals de NIEUWE logger (app/services/logger.py) ze wegschrijft:
 #   Tijdstip, Modus, WP_Doel, Lat, Lon, Fix, HDOP,
 #   Heading_Echt, Heading_Doel, Heading_Fout,
-#   Stuurhoek, Doel_kmh, Echt_kmh, DAC_Links, DAC_Rechts,
+#   Draai_dps, Kromming_1pm, Doel_kmh, Echt_kmh, DAC_Links, DAC_Rechts,
+#   Snelheid_Links_mps, Snelheid_Rechts_mps,
 #   Afstand_tot_WP_m, Lookahead_m, Loop_Tijd_s
 #
 # Let op: 'Heading_Fout' = cross-track error (m) bij de AB-navigator
@@ -79,10 +80,10 @@ def parse_time(value):
 
 def load_config_settings(project_root):
     """Leest data/config.json (val terug op config.example.json) voor de
-    relevante stuur-/voertuiginstellingen, zodat we o.a. de stuurlimiet weten."""
+    relevante skid steer-instellingen, zodat we o.a. de draailimiet weten."""
     import json
     settings = {
-        "max_angle": 50.0, "wheelbase": 1.2,
+        "max_yaw_dps": 45.0, "track_width": 0.85, "min_turn_radius": 0.85,
         "nav_lookahead": None, "source": "defaults"
     }
     for name in ("config.json", "config.example.json"):
@@ -91,8 +92,10 @@ def load_config_settings(project_root):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                settings["max_angle"] = cfg.get("steering", {}).get("max_angle_degrees", 50.0)
-                settings["wheelbase"] = cfg.get("vehicle", {}).get("wheelbase_m", 1.2)
+                vehicle = cfg.get("vehicle", {})
+                settings["max_yaw_dps"] = vehicle.get("max_yaw_rate_dps", 45.0)
+                settings["track_width"] = vehicle.get("track_width_m", 0.85)
+                settings["min_turn_radius"] = vehicle.get("min_turn_radius_m", 0.85)
                 settings["nav_lookahead"] = cfg.get("navigation", {}).get("lookahead_distance_m", None)
                 settings["source"] = name
             except Exception:
@@ -109,8 +112,8 @@ def generate_report(csv_path, report_path, cfg):
         return
 
     print(f"📂 Processing file: {file_short}")
-    max_angle = cfg["max_angle"]
-    steer_sat_threshold = max(1.0, max_angle - 0.5)
+    max_yaw_dps = cfg["max_yaw_dps"]
+    yaw_sat_threshold = max(1.0, max_yaw_dps - 0.5)
 
     # --- Lists & counters ---
     total_rows = 0
@@ -124,8 +127,8 @@ def generate_report(csv_path, report_path, cfg):
     fix_counts = {}
 
     heading_error_signed = []      # berekend uit Heading_Echt vs Heading_Doel (graden)
-    steer_list = []                # |Stuurhoek| in graden
-    steer_signed_list = []         # Stuurhoek met teken
+    yaw_list = []                  # |Draai_dps| in graden/s
+    yaw_signed_list = []           # Draai_dps met teken
     dac_diff_list, dac_avg_list = [], []
     dist_target_list = []          # Afstand_tot_WP_m (waypoint) / voortgang (AB)
 
@@ -144,7 +147,7 @@ def generate_report(csv_path, report_path, cfg):
     high_heading_count = 0
     stutter_count = 0
     stagnation_count = 0
-    steer_maxed_count = 0
+    yaw_maxed_count = 0
 
     with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -162,7 +165,7 @@ def generate_report(csv_path, report_path, cfg):
                 heading_echt = float(row["Heading_Echt"])
                 heading_doel = float(row["Heading_Doel"])
                 heading_fout = float(row["Heading_Fout"])
-                stuurhoek = float(row["Stuurhoek"])
+                draai_dps = float(row["Draai_dps"])
                 doel_kmh = float(row["Doel_kmh"])
                 echt_kmh = float(row["Echt_kmh"])
                 dac_l = int(float(row["DAC_Links"]))
@@ -195,10 +198,10 @@ def generate_report(csv_path, report_path, cfg):
 
             heading_error_signed.append(angle_difference(heading_doel, heading_echt))
 
-            steer_signed_list.append(stuurhoek)
-            steer_list.append(abs(stuurhoek))
-            if abs(stuurhoek) >= steer_sat_threshold:
-                steer_maxed_count += 1
+            yaw_signed_list.append(draai_dps)
+            yaw_list.append(abs(draai_dps))
+            if abs(draai_dps) >= yaw_sat_threshold:
+                yaw_maxed_count += 1
 
             dac_diff_list.append(abs(dac_l - dac_r))
             dac_avg_list.append((dac_l + dac_r) / 2)
@@ -326,10 +329,10 @@ def generate_report(csv_path, report_path, cfg):
     lines.append(f"- Stilstand         : {(stagnation_count / total_rows) * 100:.1f} % (doel > 0 maar staat stil)")
     lines.append("")
 
-    lines.append("[STUURSYSTEEM]")
-    lines.append(f"- Stuurhoek gem.    : {avg(steer_list):.1f}°")
-    lines.append(f"- Stuurhoek max.    : {max(steer_list):.1f}°")
-    lines.append(f"- Stuurlimiet       : {(steer_maxed_count / total_rows) * 100:.1f} % van de tijd (|hoek| >= {steer_sat_threshold:.1f}°)")
+    lines.append("[STUURSYSTEEM (SKID STEER)]")
+    lines.append(f"- Draaisnelheid gem.: {avg(yaw_list):.1f}°/s")
+    lines.append(f"- Draaisnelheid max.: {max(yaw_list):.1f}°/s")
+    lines.append(f"- Draailimiet       : {(yaw_maxed_count / total_rows) * 100:.1f} % van de tijd (|draai| >= {yaw_sat_threshold:.1f}°/s)")
     lines.append(f"- DAC-verschil gem. : {avg(dac_diff_list):.1f}  (stuurintensiteit)")
     lines.append(f"- DAC-belasting gem.: {avg(dac_avg_list):.1f}  (motorbelasting)")
     lines.append("")
@@ -346,8 +349,9 @@ def generate_report(csv_path, report_path, cfg):
 
     lines.append("[INSTELLINGEN (uit config)]")
     lines.append(f"- Bron config       : {cfg['source']}")
-    lines.append(f"- Max stuurhoek     : {cfg['max_angle']}°")
-    lines.append(f"- Wielbasis         : {cfg['wheelbase']} m")
+    lines.append(f"- Max draaisnelheid : {cfg['max_yaw_dps']}°/s")
+    lines.append(f"- Spoorbreedte      : {cfg['track_width']} m")
+    lines.append(f"- Min. draaistraal  : {cfg['min_turn_radius']} m")
     if cfg["nav_lookahead"] is not None:
         lines.append(f"- Lookahead (config): {cfg['nav_lookahead']} m")
     lines.append("")
