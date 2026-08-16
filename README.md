@@ -5,7 +5,8 @@ Follow along the project on youtube: https://www.youtube.com/@opensource_agbot/v
 Visit the website for more information https://jacobsfarm.github.io/Bruut_openagbot_website/ 
 
 newest configuration the tricycle: 
-<img width="4080" height="3072" alt="PXL_20260605_101723456 MP" src="https://github.com/user-attachments/assets/86edab93-f211-4811-9a86-be289beabb02" />
+<img width="4080" height="3072" alt="PXL_20260816_183624926" src="https://github.com/user-attachments/assets/c81b0a46-ca6d-4342-92a0-46ce6de51545" />
+
 
 This repo contains all the code information and code for the Agbot bruut Project 
 The first runs for the prototype wil be used code in Python, C++ and the front end bases on svelte
@@ -14,8 +15,8 @@ later the project wil immigrate to ROS 2 and Floxglove
 ## openscad project
 New cad designs after testing in the Field, stronger and more realistic designs and even more oppertunity for extensions
 
-<img width="4080" height="3072" alt="PXL_20260521_083012147" src="https://github.com/user-attachments/assets/4bbbf8a6-3b96-4899-a43d-e080cce21883" />
-<img width="4080" height="3072" alt="PXL_20260521_083006017" src="https://github.com/user-attachments/assets/dc83f3e7-dcda-49ca-b0ab-db368b5e6f72" />
+<img width="2380" height="1792" alt="Gemini_Generated_Image_6x3t376x3t376x3t" src="https://github.com/user-attachments/assets/882ea169-424b-40ec-9939-3123089498dc" />
+<img width="4080" height="3072" alt="PXL_20260816_183617888(1)" src="https://github.com/user-attachments/assets/71f47128-760a-4249-89a0-035e53f4c85b" />
 
 **4 wheeldrive designs** with 4 electric driven hubmotors
 <img width="670" height="468" alt="Schermafbeelding 2026-05-24 135653" src="https://github.com/user-attachments/assets/44cab0dc-73f4-4b09-ba7e-08376c236620" />
