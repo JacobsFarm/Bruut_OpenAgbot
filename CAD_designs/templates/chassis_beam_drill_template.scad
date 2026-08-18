@@ -39,6 +39,7 @@ show_reference = true;
 // ==========================================
 include <../config/parameters.scad>;
 use <../parts/chassis_beam_1.scad>;
+use <drill_bushing_m10.scad>;
 
 // ==========================================
 // GEDEELDE AFMETINGEN
@@ -55,11 +56,11 @@ z_top_center  = z_top_bottom + (tpl_thickness / 2);       // Midden van de boven
 z_top_surface = z_top_bottom + tpl_thickness;             // Bovenkant van de mal
 z_side_center = z_top_surface - (tpl_side_height / 2);    // Midden van de zijmuren
 
-// Boorgat en ring afmetingen
-drill_hole_d  = m10_bolt_diameter + 0.1;                  // Het eigenlijke boorgat (geleiding)
-bush_od       = drill_hole_d + (2 * tpl_bush_wall);       // Buitenmaat van de ring
-bush_pocket_d = bush_od + tpl_bush_fit;                   // Uitsparing in de mal
-bush_collar_d = bush_od + (2 * tpl_bush_collar_w);        // Kraag bovenop de mal
+// Boorgat en ring afmetingen (gedeelde ring uit drill_bushing_m10.scad)
+drill_hole_d  = bushing_m10_hole_d();                                   // Het eigenlijke boorgat (geleiding)
+bush_od       = bushing_m10_od(tpl_bush_wall);                          // Buitenmaat van de ring
+bush_pocket_d = bushing_m10_pocket_d(tpl_bush_wall, tpl_bush_fit);      // Uitsparing in de mal
+bush_collar_d = bushing_m10_collar_d(tpl_bush_wall, tpl_bush_collar_w);  // Kraag bovenop de mal
 
 // Gatenpatroon volgens het modulaire grid
 hole_min_x = (chassis_width_min / 2) - (bracket_top_hole_dist_x / 2);
@@ -138,38 +139,12 @@ module drill_template_segment(seg_center_x, seg_length, with_endstop=false) {
 }
 
 // ==========================================
-// OPOFFER-RING (losse boorbus)
-// ==========================================
-// Origin ligt op de bovenkant van de mal: het lijf valt in de uitsparing,
-// de kraag blijft erbovenop liggen zodat de ring er bij het boren niet doorheen zakt.
-module sacrificial_bushing() {
-    difference() {
-        union() {
-            translate([0, 0, -tpl_thickness])
-                cylinder(d=bush_od, h=tpl_thickness, $fn=64);
-
-            cylinder(d=bush_collar_d, h=tpl_bush_collar_h, $fn=64);
-        }
-
-        translate([0, 0, -tpl_thickness - 1])
-            cylinder(d=drill_hole_d, h=tpl_thickness + tpl_bush_collar_h + 2, center=false, $fn=64);
-    }
-}
-
-// Printstand: op de kop, kraag op de bodemplaat, dus zonder support
-module bushing_flat() {
-    translate([0, 0, tpl_bush_collar_h])
-        rotate([180, 0, 0])
-            sacrificial_bushing();
-}
-
-// ==========================================
 // RENDER
 // ==========================================
 if (show_single_bushing) {
     // Losse vervangingsring op de oorsprong, klaar om te slicen
     color("Tomato")
-        bushing_flat();
+        bushing_m10_flat(tpl_thickness, tpl_bush_wall, tpl_bush_collar_h, tpl_bush_collar_w);
 
 } else {
     if (show_module_1) {
@@ -188,12 +163,12 @@ if (show_single_bushing) {
                 // Hele set ringen naast de mal
                 for (i = [0 : len(bush_xs) - 1]) {
                     translate([i * (bush_collar_d + tpl_bush_pitch), tpl_bush_flat_y, 0])
-                        bushing_flat();
+                        bushing_m10_flat(tpl_thickness, tpl_bush_wall, tpl_bush_collar_h, tpl_bush_collar_w);
                 }
             } else {
                 for (x = bush_xs) {
                     translate([x, 0, z_top_surface])
-                        sacrificial_bushing();
+                        bushing_m10(tpl_thickness, tpl_bush_wall, tpl_bush_collar_h, tpl_bush_collar_w);
                 }
             }
         }
