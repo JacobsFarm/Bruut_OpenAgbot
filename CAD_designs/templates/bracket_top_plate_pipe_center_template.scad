@@ -35,7 +35,7 @@ tpl_arc_count    = 4;       // Aantal segmenten (= aantal lasopeningen)
 tpl_gap_angle    = 40;      // Hoekbreedte van de opening tussen de opzetten
 tpl_gap_rotate   = 0;       // 45 = openingen op de diagonalen, 0 = openingen op de X/Y-as
 tpl_gap_plate_a  = 40;      // Hoekbreedte van het hapje in de grondplaat (gelijk aan tpl_gap_angle = geen verbreding buitenom)
-tpl_gap_reach    = 31;      // Straal tot waar het hapje in de grondplaat loopt (boring ligt op 24,7 dus dit is een hapje van ca. 6 mm)
+tpl_gap_reach    = 38;      // Straal tot waar het hapje in de grondplaat loopt (boring ligt op 24,7 dus dit is een hapje van ca. 6 mm)
 tpl_arc_lead_in  = 1.5;     // Afschuining bovenaan, zodat de buis makkelijk invalt
 tpl_arc_skirt    = 0;       // Extra brede voet onderaan de opzetten (bij tpl_gap_rotate = 0 op 0 laten, anders raakt de voet de M8 gaten)
 tpl_arc_support  = 1;       // Rand plaatmateriaal die onder de opzetten blijft staan, zodat ze niet boven de uitsparing zweven
