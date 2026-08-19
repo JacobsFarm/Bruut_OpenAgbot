@@ -9,6 +9,7 @@ grid_step = 50; // Universele stapgrootte voor alle gaten
 m12_bolt_diameter = 12.4; //dikte van de gaten van m12 bout
 m10_bolt_diameter = 10.4; //dikte van de gaten van m10 bout
 m8_bolt_diameter = 8.4; //dikte van de gaten van m8 bout  
+m6_bolt_diameter = 6.4; //dikte van de gaten van m6 bout  
 
 
 // --- Bereiken (Ranges) voor de Robot Afmetingen ---
