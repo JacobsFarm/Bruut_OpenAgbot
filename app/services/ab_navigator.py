@@ -39,7 +39,14 @@ class ABNavigator:
 
         # Voertuig / stuur
         self.wheelbase = config.get("vehicle", {}).get("wheelbase_m", 1.2)
-        self.max_angle = config.get("steering", {}).get("max_angle_degrees", 45.0)
+        # Grootste stuurhoek van het virtuele midden van de vooras. Dit is NIET
+        # de wiellimiet uit de config: het binnenste voorwiel staat bij Ackermann
+        # scherper dan het midden. Via deze waarde klopt ook de minimale
+        # draaicirkel hieronder, en daarmee de kopakkerbocht.
+        self.max_angle = getattr(
+            vehicle_controller, "max_center_angle",
+            config.get("steering", {}).get("max_angle_degrees", 45.0)
+        )
 
         # Navigatie-instellingen (met config-fallback)
         nav_cfg = config.get("navigation", {})
@@ -122,8 +129,8 @@ class ABNavigator:
         if self.drive_logger:
             self.drive_logger.start_nieuwe_rit(navigatie_modus="AB_Missie")
 
-        # Minimale draaicirkel uit de hardware (driewieler, 1 gestuurd voorwiel):
-        # R_min = wielbasis / tan(max stuurhoek). Een 180-graden kopakkerbocht
+        # Minimale draaicirkel uit de hardware (twee gestuurde voorwielen):
+        # R_min = wielbasis / tan(max middenhoek). Een 180-graden kopakkerbocht
         # verplaatst de robot 2*R_min zijwaarts; is de werkbreedte kleiner, dan
         # kan hij niet in één halve cirkel op de volgende baan landen.
         min_radius = self.wheelbase / math.tan(math.radians(self.max_angle))

@@ -29,7 +29,14 @@ class Navigator:
         # Voertuig & Stuur parameters
         self.wheelbase = config.get("vehicle", {}).get("wheelbase_m", 1.2)
         steering_config = config.get("steering", {})
-        self.max_angle = steering_config.get("max_angle_degrees", 45.0)
+        # Grootste stuurhoek van het virtuele midden. Dit is NIET de wiellimiet
+        # uit de config: het binnenste voorwiel staat bij Ackermann scherper dan
+        # het midden, dus de bruikbare middenhoek ligt lager. De
+        # VehicleController leidt hem af uit wielbasis en spoorbreedte.
+        self.max_angle = getattr(
+            vehicle_controller, "max_center_angle",
+            steering_config.get("max_angle_degrees", 45.0)
+        )
         
         # Pure Pursuit & Navigatie instellingen
         nav_config = config.get("navigation", {})

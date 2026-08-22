@@ -1,7 +1,9 @@
 {
   "test_setup": {
+    "description": "Twee gestuurde voorwielen, elk met een eigen NEMA 34 stappenmotor en HBS86H driver, aangestuurd door een Arduino UNO R4 Minima.",
     "power_supply": {
-      "voltage": "48V DC"
+      "voltage": "48V DC",
+      "note": "Twee HBS86H drivers op een gedeelde voeding. Reken op ca. 8A piek per driver; controleer of de voeding dat aankan of gebruik twee losse voedingen."
     },
     "stepper_configuration": {
       "motor_type": "NEMA 34 stepper motor",
@@ -14,15 +16,86 @@
         "sw4": "on"
       },
       "gearbox_ratio": "5:1",
-      "step_delay_us": 100
+      "steps_per_degree": 44.4444,
+      "step_delay_us": 100,
+      "note": "Beide motoren zijn identiek geconfigureerd (zelfde dipswitches, zelfde microstepping)."
     },
     "arduino_r4_minima_connections": {
-      "serial_communication_baudrate": 9600,
-      "pin_mapping": {
-        "pul_plus": 5,
-        "dir_plus": 6,
-        "ena_plus": 7
+      "board": "Arduino UNO R4 Minima",
+      "logic_level_volt": 5,
+      "serial_port_used": "Serial (native USB CDC)",
+      "serial_communication_baudrate": 115200,
+      "reserved_pins": {
+        "0": "Serial1 RX - bewust vrijgehouden voor UART debug",
+        "1": "Serial1 TX - bewust vrijgehouden voor UART debug"
+      },
+      "motors": [
+        {
+          "id": "left",
+          "position": "linker voorwiel",
+          "driver": "HBS86H #1",
+          "pin_mapping": {
+            "pul_plus": 2,
+            "dir_plus": 3,
+            "ena_plus": 4
+          }
+        },
+        {
+          "id": "right",
+          "position": "rechter voorwiel",
+          "driver": "HBS86H #2",
+          "pin_mapping": {
+            "pul_plus": 5,
+            "dir_plus": 6,
+            "ena_plus": 7
+          }
+        }
+      ]
+    },
+    "grounds": {
+      "signal_ground": "PUL-, DIR- en ENA- van BEIDE drivers samen doorverbinden naar een Arduino GND pin.",
+      "power_ground": "De 48V-min gaat uitsluitend naar de VDC- klem van beide drivers.",
+      "isolation": "Arduino GND NIET doorverbinden met de 48V-min. De ingangen van de HBS86H zijn opto-geisoleerd; die scheiding houdt de schakelruis van 48V uit de Arduino.",
+      "series_resistor": "Niet nodig bij 5V logica. Pas bij 24V sturing een voorschakelweerstand op de + ingangen plaatsen."
+    },
+    "wiring_notes": [
+      "Signaalkabels (PUL/DIR/ENA) weg houden van de motorfasen, of afgeschermde kabel gebruiken. Overspraak op PUL is de klassieke oorzaak van een wegloper.",
+      "DIR moet stabiel zijn voordat de PUL flank komt; de firmware wacht 5us na een richtingswissel.",
+      "Elk voorwiel heeft zijn eigen mechanische nulpunt. Beide apart kalibreren met ZL: en ZR: - een half graadje verschil geeft permanente spanning op de as.",
+      "Het is af te raden DIR en ENA te delen tussen beide drivers: bij correctiebewegingen kunnen de wielen tegengesteld moeten draaien."
+    ],
+    "serial_protocol": {
+      "framing": "ASCII regels, afgesloten met \n. Commando's zijn hoofdletterongevoelig. Elk commando geeft een antwoordregel terug.",
+      "commands": {
+        "A:<deg>": "Zet beide wielen op dezelfde doelhoek.",
+        "A:<links>,<rechts>": "Zet per wiel een aparte doelhoek (Ackermann).",
+        "AL:<deg>": "Alleen linker wiel naar doelhoek.",
+        "AR:<deg>": "Alleen rechter wiel naar doelhoek.",
+        "J:<links>,<rechts>": "Relatieve verplaatsing in graden (jog, voor kalibratie).",
+        "E:<0|1>": "Beide motoren vrijzetten (0) of vastzetten (1). Bij vastzetten wordt de doelhoek gelijkgezet aan de huidige stand, zodat een wiel na handmatig verdraaien niet naar een oud doel schiet; stuur daarna opnieuw een A: commando.",
+        "EL:<0|1>": "Alleen linker motor vrij/vast.",
+        "ER:<0|1>": "Alleen rechter motor vrij/vast.",
+        "Z:0": "Huidige stand van beide wielen als nulpunt instellen.",
+        "ZL:0": "Alleen linker wiel nullen.",
+        "ZR:0": "Alleen rechter wiel nullen.",
+        "P:?": "Vraag posities op.",
+        "S:?": "Vraag volledige status op.",
+        "V:<min_us>[,<start_us>,<ramp_steps>]": "Stel snelheid en acceleratieramp in.",
+        "M:<deg>": "Stel de softwarelimiet voor de maximale stuuruitslag in.",
+        "I:?": "Identificatie van de firmware."
+      },
+      "responses": {
+        "READY": "Wordt eenmalig gestuurd zodra de firmware is opgestart.",
+        "ID:<naam>,<versie>,MOTORS=2": "Antwoord op I:?",
+        "POS:<links>,<rechts>": "Antwoord op P:? - huidige hoek per wiel in graden.",
+        "STA:POS=<l>,<r>;TGT=<l>,<r>;EN=<0|1>,<0|1>;MOV=<0|1>;LIM=<deg>;VMIN=<us>;VSTART=<us>;RAMP=<steps>": "Antwoord op S:?",
+        "OK:<commando>": "Commando geaccepteerd en uitgevoerd.",
+        "ERR:<reden>": "Commando geweigerd (onbekend, ontbrekende parameter of waarde buiten bereik)."
       }
+    },
+    "firmware": {
+      "file": "Arduino/arduino_controlling_dual_steppercontroller.cpp",
+      "supersedes": "Arduino/arduino_controlling_steppercontroller.cpp (enkele stuurmotor, driewieler-opstelling)"
     }
   }
 }

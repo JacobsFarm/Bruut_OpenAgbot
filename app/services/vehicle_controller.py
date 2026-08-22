@@ -27,7 +27,14 @@ class VehicleController:
         self.wheelbase = config.get("vehicle", {}).get("wheelbase_m", 1.2)      
         self.track_width = config.get("vehicle", {}).get("track_width_m", 1.0)  
         self.max_wheel_diff_dac = config.get("vehicle", {}).get("max_wheel_diff_dac", 1000.0)
-        
+        self.max_steer_angle = config.get("steering", {}).get("max_angle_degrees", 45.0)
+
+        # max_angle_degrees is de limiet van een WIEL. Het binnenste wiel staat
+        # bij Ackermann altijd scherper dan het virtuele midden, dus de grootste
+        # bruikbare middenhoek ligt lager. Zonder deze afleiding zou het
+        # binnenwiel afgekapt worden en klopt de Ackermann-verhouding niet meer.
+        self.max_center_angle = self._max_center_angle()
+
         # 3. Motor Controle & Limieten (NU GEKOPPELD AAN CONFIG.JSON!)
         motor_cfg = config.get("motor_control", {})
         self.dac_stop = motor_cfg.get("dac_stop", 700.0)
@@ -48,16 +55,37 @@ class VehicleController:
         self.smoothing_thread = threading.Thread(target=self._smoothing_loop, daemon=True)
         self.smoothing_thread.start()
         
-        self.logger.info("VehicleController succesvol opgestart gekoppeld aan config.json.")
+        self.logger.info(
+            f"VehicleController succesvol opgestart gekoppeld aan config.json. "
+            f"Wiellimiet {self.max_steer_angle:.1f}° komt neer op maximaal "
+            f"{self.max_center_angle:.1f}° middenhoek."
+        )
+
+    def _max_center_angle(self):
+        """
+        Grootste stuurhoek van het virtuele midden waarbij het binnenste
+        voorwiel nog net binnen max_steer_angle blijft.
+        """
+        tangens = math.tan(math.radians(self.max_steer_angle))
+        if tangens <= 1e-6:
+            return self.max_steer_angle
+        radius = self.wheelbase / tangens + (self.track_width / 2.0)
+        return math.degrees(math.atan(self.wheelbase / radius))
 
     def drive(self, speed_kmh, angle_degrees):
         """
         Het hoofdcommando voor navigatie en handmatige besturing.
         Zet snelheid en hoek om in veilige, gecorrigeerde motorsignalen.
         """
-        # 1. Stuur zwenkwiel aan
-        self.stepper_steering.set_angle(angle_degrees)
-        
+        # 0. Begrens de gevraagde middenhoek. Doen we dit niet, dan kapt de
+        #    stuurmodule straks alleen het binnenwiel af en staan de twee
+        #    voorwielen niet meer in de juiste Ackermann-verhouding.
+        angle_degrees = max(-self.max_center_angle, min(self.max_center_angle, angle_degrees))
+
+        # 1. Stuur de twee voorwielen aan, elk onder zijn eigen Ackermann-hoek
+        hoek_links, hoek_rechts = self._calculate_ackermann_steering(angle_degrees)
+        self.stepper_steering.set_angles(hoek_links, hoek_rechts)
+
         # 2. Als we praktisch stilstaan, stuur direct STOP (rustwaarde 700)
         if abs(speed_kmh) < 0.1:
             self.target_dac_links = self.dac_stop
@@ -92,7 +120,8 @@ class VehicleController:
         self.target_dac_rechts = max(self.dac_min_start, min(self.dac_max, dac_r))
         
         self.logger.debug(
-            f"Stuur: {angle_degrees:.1f}° | Verschil: {int(dac_diff)} DAC | "
+            f"Stuur: {angle_degrees:.1f}° (wiel L:{hoek_links:.1f}° R:{hoek_rechts:.1f}°) | "
+            f"Verschil: {int(dac_diff)} DAC | "
             f"Output L: {int(self.target_dac_links)} R: {int(self.target_dac_rechts)}"
         )
 
@@ -105,6 +134,57 @@ class VehicleController:
         self.motor_controller.stop()
         self.logger.warning("VOERTUIG NOODSTOP GEACTIVEERD.")
 
+    def _turning_radius(self, angle_degrees):
+        """
+        Draaistraal vanaf het virtuele midden van de vooras (fietsmodel).
+
+        Positief = bocht naar RECHTS, gemeten naar rechts vanaf het voertuig.
+        Dat is de conventie van de hele rest van het systeem: de navigators
+        rekenen alpha = doelpeiling - koers in kompasgraden (doel naar rechts
+        geeft een positieve hoek) en de frontend labelt positief als 'Rechts'.
+
+        Geeft None terug bij rechtuit rijden.
+        """
+        tangens = math.tan(math.radians(angle_degrees))
+        if abs(tangens) < 1e-6:
+            return None
+        return self.wheelbase / tangens
+
+    def _calculate_ackermann_steering(self, angle_degrees):
+        """
+        Zet de gevraagde stuurhoek van het virtuele midden om naar een aparte
+        hoek per voorwiel.
+
+        Het binnenste wiel draait een kleinere cirkel en moet dus scherper
+        staan dan het buitenste. Krijgen beide wielen dezelfde hoek, dan
+        vechten ze via de grond tegen elkaar: dat schuurt de banden en belast
+        de tandwielkasten permanent.
+        """
+        radius = self._turning_radius(angle_degrees)
+        if radius is None:
+            return angle_degrees, angle_degrees  # rechtuit, beide wielen gelijk
+
+        half_track = self.track_width / 2.0
+
+        # Ligt het draaipunt binnen de spoorbreedte, dan klapt de meetkunde om
+        # en zou het binnenwiel de andere kant op sturen. Met de standaardlimiet
+        # kan dat niet gebeuren, maar we vangen het af in plaats van een
+        # verkeerd teken door te laten.
+        if abs(radius) <= half_track:
+            limiet = math.copysign(self.max_steer_angle, angle_degrees)
+            self.logger.warning(
+                f"Draaistraal ({radius:.2f} m) valt binnen de spoorbreedte. "
+                f"Stuuruitslag begrensd op {limiet:.1f}°."
+            )
+            return limiet, limiet
+
+        # Positieve hoek = bocht naar rechts, dus dan is het RECHTER wiel het
+        # binnenste en moet dat scherper staan. Bij een linkse bocht wordt de
+        # straal negatief en draait de verhouding vanzelf om.
+        hoek_rechts = math.degrees(math.atan(self.wheelbase / (radius - half_track)))
+        hoek_links = math.degrees(math.atan(self.wheelbase / (radius + half_track)))
+        return hoek_links, hoek_rechts
+
     def _calculate_differential(self, speed_mps, angle_degrees):
         """
         Berekent wielsnelheden gebaseerd op Ackermann besturing.
@@ -112,13 +192,16 @@ class VehicleController:
         """
         if abs(angle_degrees) < 1.0:
             return speed_mps, speed_mps # Rijden in een rechte lijn
-            
-        angle_rad = math.radians(angle_degrees)
-        turning_radius = self.wheelbase / math.tan(angle_rad)
-        
-        # Bereken snelheid per wiel gebaseerd op de draaicirkel
-        v_links = speed_mps * (1 - (self.track_width / (2 * turning_radius)))
-        v_rechts = speed_mps * (1 + (self.track_width / (2 * turning_radius)))
+
+        turning_radius = self._turning_radius(angle_degrees)
+        if turning_radius is None:
+            return speed_mps, speed_mps
+
+        # Bereken snelheid per wiel gebaseerd op de draaicirkel. Positief =
+        # bocht naar rechts, dus dan loopt het RECHTER wiel de kleinste cirkel
+        # en moet dat langzamer draaien.
+        v_rechts = speed_mps * (1 - (self.track_width / (2 * turning_radius)))
+        v_links = speed_mps * (1 + (self.track_width / (2 * turning_radius)))
 
         # Anti-Achteruit: Omdat DAC in dit simpele systeem alleen 'vooruit' is,
         # dwingen we het binnenste wiel minimaal mee te rollen (0.05 m/s) in plaats van tegengas te geven.

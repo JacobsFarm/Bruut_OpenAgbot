@@ -9,7 +9,7 @@
     "arduino_dac_port": "/dev/ttyACM3", 
     "arduino_dac_baudrate": 115200,
     "arduino_stepper_port": "/dev/ttyACM0", 
-    "arduino_stepper_baudrate": 9600
+    "arduino_stepper_baudrate": 115200
   },
   "vehicle": {
     "wheelbase_m": 1.20,
@@ -17,8 +17,21 @@
     "max_wheel_diff_dac": 1000.0
   },
   "steering": {
-    "max_angle_degrees": 50.0,
-    "invert_direction": true
+    "_comment_limiet": "max_angle_degrees is de limiet per WIEL. De maximale middenhoek wordt daaruit afgeleid en ligt lager, omdat het binnenwiel bij Ackermann scherper staat.",
+    "max_angle_degrees": 35.0,
+
+    "_comment_invert": "Op DEZE machine staan beide op true en dan staan de wielen goed; niet omzetten. De stuurkasten zitten gespiegeld, maar een van de twee motoren is bij het aansluiten al omgedraaid in de bedrading, dus in software moeten ze gelijk staan. Wat telt is of deze twee GELIJK of VERSCHILLEND zijn, niet welke waarde ze hebben. Opnieuw uitmeten na verbouwen: op bokken beide wielen naar dezelfde hoek sturen; zetten ze zich in een V (naar elkaar toe), klap dan precies EEN van de twee om; draaien ze samen maar de verkeerde kant op, klap ze dan ALLEBEI om.",
+    "invert_left": true,
+    "invert_right": true,
+
+    "_comment_snelheid": "Optioneel. Wordt bij het opstarten naar de Arduino gestuurd (V:). Lagere delay = sneller. De ramp voorkomt stapverlies bij het optrekken van de NEMA 34's.",
+    "min_step_delay_us": 300,
+    "start_step_delay_us": 1200,
+    "ramp_steps": 400,
+
+    "_comment_verkeer": "Onderdrukt overbodig serieel verkeer: alleen sturen bij een verandering van minstens min_change_degrees, met elke resend_interval_sec een herhaling als levensteken.",
+    "min_change_degrees": 0.1,
+    "resend_interval_sec": 1.0
   },
   "motor_control": {
     "dac_stop": 700,

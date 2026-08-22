@@ -23,6 +23,14 @@ class ManualDriveCommand(BaseModel):
 
 class SteeringEnableCommand(BaseModel):
     enable: bool
+    wheel: str = None      # None = beide voorwielen, anders 'left' of 'right'
+
+class SteeringZeroCommand(BaseModel):
+    wheel: str = None      # None = beide voorwielen, anders 'left' of 'right'
+
+class SteeringJogCommand(BaseModel):
+    left_delta: float = 0.0
+    right_delta: float = 0.0
 
 class ABMissionCommand(BaseModel):
     work_width_m: float
@@ -124,23 +132,60 @@ def noodstop():
 @router.post("/nav/manual_drive")
 def manual_drive(cmd: ManualDriveCommand):
     stop_alle_navigatie()
-    max_angle = config.get("steering", {}).get("max_angle_degrees", 45.0)
+    # Schaal op de maximale MIDDENHOEK, niet op de wiellimiet uit de config.
+    # Het binnenste voorwiel staat bij Ackermann scherper dan het virtuele
+    # midden; zou de schuif op de wiellimiet schalen, dan doet het laatste stuk
+    # van zijn bereik niets omdat de VehicleController het toch afkapt.
+    max_angle = vehicle_controller.max_center_angle
     actual_angle = (cmd.steering_percentage / 100.0) * max_angle
     vehicle_controller.drive(cmd.speed_kmh, actual_angle)
     return {"status": "driving"}
 
 @router.post("/steering/enable")
 def toggle_steering(cmd: SteeringEnableCommand):
-    if cmd.enable:
-        vehicle_controller.stepper_steering.enable()
-    else:
-        vehicle_controller.stepper_steering.disable()
+    steering = vehicle_controller.stepper_steering
+    try:
+        if cmd.enable:
+            steering.enable(cmd.wheel)
+        else:
+            steering.disable(cmd.wheel)
+    except ValueError as e:
+        return {"status": "error", "msg": str(e)}
     return {"status": "success"}
 
 @router.post("/steering/zero")
-def zero_steering():
-    vehicle_controller.stepper_steering.set_zero()
+def zero_steering(cmd: SteeringZeroCommand = None):
+    """
+    Nulpunt instellen. Zonder body worden beide voorwielen genuld; met
+    {"wheel": "left"} of {"wheel": "right"} kalibreer je er een apart.
+    Dat laatste is nodig omdat elk voorwiel zijn eigen mechanische nulpunt
+    heeft: staan ze niet exact gelijk, dan blijft er spanning op de vooras.
+    """
+    try:
+        vehicle_controller.stepper_steering.set_zero(cmd.wheel if cmd else None)
+    except ValueError as e:
+        return {"status": "error", "msg": str(e)}
     return {"status": "success"}
+
+@router.post("/steering/jog")
+def jog_steering(cmd: SteeringJogCommand):
+    """
+    Relatieve verplaatsing per wiel in graden, voor het fijn uitlijnen tijdens
+    het kalibreren. Werkt alleen op een wiel dat vastgezet (enabled) is.
+    """
+    vehicle_controller.stepper_steering.jog(cmd.left_delta, cmd.right_delta)
+    return {"status": "success"}
+
+@router.get("/steering/status")
+def steering_status():
+    """Actuele stand van beide voorwielen plus de geldende limieten."""
+    steering = vehicle_controller.stepper_steering.get_status()
+    return {
+        "status": "success" if steering else "no_reply",
+        "steering": steering,
+        "max_wheel_angle_degrees": vehicle_controller.max_steer_angle,
+        "max_center_angle_degrees": vehicle_controller.max_center_angle
+    }
 
 @router.post("/nav/start_ab")
 def start_ab_mission(cmd: ABMissionCommand):
