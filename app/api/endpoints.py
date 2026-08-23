@@ -42,6 +42,13 @@ class ABMissionCommand(BaseModel):
     lon_b: float
     lookahead_m: float = None
     turn_speed_kmh: float = None
+    # Missieplan uit data/ab_line.json (gemaakt met AB_mission_maker.py).
+    # Zonder deze velden rijdt hij gewoon 0,1,2,... zoals vroeger.
+    swath_order: list = None
+    aantal_banen: int = None
+    banen_overslaan: int = 1
+    kopakker_extra_m: float = None
+    kant: str = "rechts"
 
 class ABSliderUpdateCommand(BaseModel):
     lookahead_m: float = None
@@ -114,8 +121,14 @@ def get_status():
         "nav_message": navigator.status_message,
         "ab_active": ab_navigator.is_active,
         "ab_state": ab_navigator.state,
+        "ab_message": ab_navigator.status_message,
         "current_wp": navigator.current_wp_index if navigator.is_active else 0,
-        "current_swath": ab_navigator.current_swath if ab_navigator.is_active else 0
+        "current_swath": ab_navigator.current_swath if ab_navigator.is_active else 0,
+        # Voortgang door de werkvolgorde, plus of hij in het gewas of op de
+        # kopakker rijdt - handig om straks een werktuig aan te koppelen.
+        "ab_baan_nr": ab_navigator.order_index + 1 if ab_navigator.is_active else 0,
+        "ab_totaal_banen": len(ab_navigator.swath_order),
+        "ab_in_werkzone": ab_navigator.in_werkzone
     })
     return pos
 
@@ -197,8 +210,19 @@ def start_ab_mission(cmd: ABMissionCommand):
         ab_navigator.lookahead_m = cmd.lookahead_m
     if cmd.turn_speed_kmh is not None:
         ab_navigator.turn_speed_kmh = cmd.turn_speed_kmh
-    ab_navigator.start_mission(cmd.work_width_m, cmd.field_length_m, cmd.speed_kmh)
-    return {"status": "started"}
+    ab_navigator.start_mission(
+        cmd.work_width_m, cmd.field_length_m, cmd.speed_kmh,
+        swath_order=cmd.swath_order,
+        aantal_banen=cmd.aantal_banen,
+        banen_overslaan=cmd.banen_overslaan,
+        kopakker_extra_m=cmd.kopakker_extra_m,
+        kant=cmd.kant
+    )
+    return {
+        "status": "started",
+        "baan_volgorde": ab_navigator.swath_order,
+        "kopakker_extra_m": ab_navigator.headland_overrun_m
+    }
 
 @router.post("/nav/update_ab_sliders")
 def update_ab_sliders(cmd: ABSliderUpdateCommand):

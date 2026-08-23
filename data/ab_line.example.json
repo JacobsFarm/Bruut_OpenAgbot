@@ -1,9 +1,27 @@
 [
     {
-        "veldnaam": "fieldname",
-        "lat_a": 52.00000000000000,
-        "lon_a": 4.00000000000000,
-        "lat_b": 52.00000000000000,
-        "lon_b": 4.00000000000000
+        "veldnaam": "test_field",
+        "lat_a": 52.000000000,
+        "lon_a": 4.000000000,
+        "lat_b": 52.00000001000,
+        "lon_b": 4.0000010000,
+        "werkbreedte_m": 4.0,
+        "aantal_banen": 8,
+        "banen_overslaan": 1,
+        "baanlengte_m": 38.806,
+        "kopakker_extra_m": 2.0,
+        "kant": "rechts",
+        "werksnelheid_kmh": 3.0,
+        "bochtsnelheid_kmh": 2.0,
+        "baan_volgorde": [
+            0,
+            2,
+            4,
+            6,
+            7,
+            5,
+            3,
+            1
+        ]
     }
 ]

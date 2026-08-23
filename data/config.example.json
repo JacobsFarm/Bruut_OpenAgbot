@@ -43,7 +43,16 @@
   "navigation": {
     "lookahead_distance_m": 3.0,
     "arrival_threshold_intermediate_m": 0.8,
-    "arrival_threshold_final_m": 0.8
+    "arrival_threshold_final_m": 0.8,
+
+    "_comment_ab": "Alleen voor de AB-lijn missies. headland_overrun_m = hoeveel meter de robot voorbij het einde van de baan doorrijdt voordat hij draait; diezelfde marge is aan de andere kant zijn rechte aanloop, zodat hij kaarsrecht op de nieuwe lijn ligt voordat het gewas begint. Deze waarde wordt overschreven door kopakker_extra_m uit ab_line.json.",
+    "headland_overrun_m": 2.0,
+    "turn_speed_kmh": 2.0,
+
+    "_comment_bocht": "turn_lookahead_m staat bewust korter dan de lookahead op de lijn: met een lange lookahead snijdt pure pursuit de kopakkerboog af en komt hij scheef de nieuwe baan in. De bocht is klaar zodra de koers binnen turn_heading_tolerance_deg van de nieuwe baanrichting ligt; turn_timeout_s is het vangnet tegen eindeloos rondjes draaien.",
+    "turn_lookahead_m": 1.5,
+    "turn_heading_tolerance_deg": 5.0,
+    "turn_timeout_s": 90.0
   },
   "ntrip": {
     "host": "caster.centipede.fr",
