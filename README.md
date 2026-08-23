@@ -4,7 +4,8 @@ Project for making the Bruut_OpenAgbot
 Follow along the project on youtube: https://www.youtube.com/@opensource_agbot/videos
 Visit the website for more information https://jacobsfarm.github.io/Bruut_openagbot_website/ 
 
-newest configuration the tricycle: 
+newest configuration the 2WD: 
+<img width="4000" height="2250" alt="DJI_0515" src="https://github.com/user-attachments/assets/65ba3379-2303-49a0-9600-235584ea8edb" />
 <img width="4080" height="3072" alt="PXL_20260816_183624926" src="https://github.com/user-attachments/assets/c81b0a46-ca6d-4342-92a0-46ce6de51545" />
 
 
