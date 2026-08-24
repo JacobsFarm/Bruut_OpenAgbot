@@ -4,8 +4,8 @@ Project for making the Bruut_OpenAgbot
 Follow along the project on youtube: https://www.youtube.com/@opensource_agbot/videos
 Visit the website for more information https://jacobsfarm.github.io/Bruut_openagbot_website/ 
 
-newest configuration the 2WD: 
-<img width="4000" height="2250" alt="DJI_0515" src="https://github.com/user-attachments/assets/65ba3379-2303-49a0-9600-235584ea8edb" />
+newest configuration the 2WD: with AB line driving
+<img width="4000" height="2250" alt="DJI_0523" src="https://github.com/user-attachments/assets/4cc46809-3ec2-4927-9e47-56f9b0d914db" />
 <img width="4080" height="3072" alt="PXL_20260816_183624926" src="https://github.com/user-attachments/assets/c81b0a46-ca6d-4342-92a0-46ce6de51545" />
 
 
@@ -29,6 +29,9 @@ New cad designs after testing in the Field, stronger and more realistic designs 
 <img width="647" height="568" alt="Schermafbeelding 2026-05-24 223704" src="https://github.com/user-attachments/assets/f357dc0f-3353-4115-96fc-2df9d8215177" />
 <img width="687" height="591" alt="Schermafbeelding 2026-05-24 223727" src="https://github.com/user-attachments/assets/7ee337e6-564b-467f-88c6-9d8ea53cddcc" />
 
+## AB line driving
+<img width="1064" height="651" alt="Schermafbeelding 2026-08-24 190629" src="https://github.com/user-attachments/assets/4f4d8b31-2ed4-4af4-a4dc-4c28f057f99b" />
+<img width="4000" height="2250" alt="DJI_0523" src="https://github.com/user-attachments/assets/543cfdbe-86a9-4e2a-b1bb-e685c7c1f7a1" />
 
 ## Options 
 making taskcards of the detection of diseases / birdnests or Sprayed weed
