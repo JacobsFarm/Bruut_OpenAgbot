@@ -1,0 +1,737 @@
+<title>Motorboom op de Classic</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Spline+Sans+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground:      #E3E8EA;
+    --surface:     #F8FAFA;
+    --surface-2:   #EDF1F2;
+    --ink:         #12181B;
+    --ink-mid:     #46545A;
+    --ink-soft:    #6E7C82;
+    --rule:        #C2CDD1;
+    --rule-soft:   #D8E0E2;
+    --accent:      #B8420A;
+    --accent-soft: #F2E3DA;
+    --danger:      #9C1D14;
+    --danger-soft: #F7E3E0;
+    --steel:       #3A464B;
+
+    --w-blue:   #1E5FBF;
+    --w-green:  #1C8A3E;
+    --w-yellow: #C99700;
+    --w-red:    #C4231C;
+    --w-black:  #171C1E;
+    --w-white:  #FBFBF7;
+    --w-purple: #7A3EA8;
+    --w-orange: #DE6A0C;
+    --w-stroke: rgba(18, 24, 27, .32);
+
+    --f-display: "Saira Condensed", "Arial Narrow", Arial, sans-serif;
+    --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --f-mono: "Spline Sans Mono", ui-monospace, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1316;
+      --surface:     #161D21;
+      --surface-2:   #1E262A;
+      --ink:         #E5EBED;
+      --ink-mid:     #A6B4BA;
+      --ink-soft:    #7F8D93;
+      --rule:        #2C3639;
+      --rule-soft:   #232B2E;
+      --accent:      #FF8348;
+      --accent-soft: #351C10;
+      --danger:      #F0897E;
+      --danger-soft: #331B18;
+      --steel:       #94A3A8;
+
+      --w-blue:   #5B9BF0;
+      --w-green:  #4FBF6E;
+      --w-yellow: #E6BE2E;
+      --w-red:    #F0675C;
+      --w-black:  #8A9499;
+      --w-white:  #FBFBF7;
+      --w-purple: #B681E0;
+      --w-orange: #F59341;
+      --w-stroke: rgba(229, 235, 237, .34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1316;
+    --surface:     #161D21;
+    --surface-2:   #1E262A;
+    --ink:         #E5EBED;
+    --ink-mid:     #A6B4BA;
+    --ink-soft:    #7F8D93;
+    --rule:        #2C3639;
+    --rule-soft:   #232B2E;
+    --accent:      #FF8348;
+    --accent-soft: #351C10;
+    --danger:      #F0897E;
+    --danger-soft: #331B18;
+    --steel:       #94A3A8;
+
+    --w-blue:   #5B9BF0;
+    --w-green:  #4FBF6E;
+    --w-yellow: #E6BE2E;
+    --w-red:    #F0675C;
+    --w-black:  #8A9499;
+    --w-white:  #FBFBF7;
+    --w-purple: #B681E0;
+    --w-orange: #F59341;
+    --w-stroke: rgba(229, 235, 237, .34);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding-block: 34px 110px;
+    padding-inline: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 44px;
+  }
+
+  .prose { max-width: 66ch; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 20px;
+  }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(34px, 6.4vw, 60px);
+    line-height: .98;
+    letter-spacing: -.005em;
+    text-transform: uppercase;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 17px;
+    color: var(--ink-mid);
+    max-width: 60ch;
+    margin: 0;
+  }
+  .idline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 22px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    padding-top: 6px;
+  }
+  .idline b { color: var(--ink-mid); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+  section { display: flex; flex-direction: column; gap: 18px; }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    margin: 0;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  h2 .note {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink-soft);
+    font-weight: 400;
+    margin-left: auto;
+  }
+  h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 21px;
+    letter-spacing: .005em;
+    margin: 0;
+  }
+  p { margin: 0; }
+  p + p { margin-top: 11px; }
+
+  /* ---------- the one loud thing ---------- */
+  .alarm {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 20px;
+    background: var(--danger-soft);
+    border-left: 5px solid var(--danger);
+    padding: 20px 22px;
+  }
+  .alarm .mark {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 40px;
+    line-height: .9;
+    color: var(--danger);
+    grid-row: span 2;
+  }
+  .alarm h3 { color: var(--danger); }
+  .alarm p { color: var(--ink); max-width: 62ch; }
+
+  /* ---------- figure ---------- */
+  figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  .frame {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 18px;
+    overflow-x: auto;
+  }
+  .frame svg { display: block; width: 100%; min-width: 660px; height: auto; }
+  .face { min-width: 380px; max-width: 540px; }
+  figcaption {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    max-width: 64ch;
+  }
+  figcaption b { color: var(--ink-mid); font-weight: 600; }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    min-width: 560px;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-align: left;
+    padding: 0 16px 9px 0;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 16px 10px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: baseline;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.off td { color: var(--ink-soft); }
+  .term { font-family: var(--f-mono); font-size: 13px; white-space: nowrap; }
+  .thick-cell { font-family: var(--f-mono); font-size: 13px; }
+
+  .wire { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .chip {
+    width: 16px; height: 16px;
+    border: 1px solid var(--w-stroke);
+    flex: none;
+  }
+  .chip.fat { width: 22px; height: 22px; border-radius: 50%; }
+  .c-blue   { background: var(--w-blue); }
+  .c-green  { background: var(--w-green); }
+  .c-yellow { background: var(--w-yellow); }
+  .c-red    { background: var(--w-red); }
+  .c-black  { background: var(--w-black); }
+  .c-white  { background: var(--w-white); }
+  .c-purple { background: var(--w-purple); }
+  .c-orange { background: var(--w-orange); }
+
+  /* ---------- steps ---------- */
+  ol.steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    counter-reset: s;
+  }
+  ol.steps > li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  ol.steps > li:last-child { border-bottom: none; }
+  ol.steps > li::before {
+    content: counter(s, decimal-leading-zero);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding-top: 3px;
+  }
+  ol.steps .what { display: flex; flex-direction: column; gap: 4px; }
+  ol.steps strong { font-weight: 600; }
+  ol.steps .why { color: var(--ink-soft); font-size: 14px; max-width: 62ch; }
+
+  /* ---------- loose-ends cards ---------- */
+  .ends {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+  .end {
+    background: var(--surface);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .end .hdr { display: flex; align-items: center; gap: 10px; }
+  .end .name {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .end p { font-size: 14px; color: var(--ink-mid); }
+  .end .verdict {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ---------- callout ---------- */
+  .callout {
+    background: var(--accent-soft);
+    padding: 18px 20px;
+    border-left: 3px solid var(--accent);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .callout .lbl {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .callout p { max-width: 64ch; }
+
+  pre {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-soft);
+    padding: 14px 16px;
+    margin: 0;
+    overflow-x: auto;
+    color: var(--ink-mid);
+  }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 16px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+  }
+
+  @media (max-width: 560px) {
+    ol.steps > li { grid-template-columns: 30px 1fr; gap: 12px; }
+    .alarm { grid-template-columns: 1fr; gap: 10px; }
+    .alarm .mark { grid-row: auto; font-size: 30px; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="eyebrow">Bouwblad 02 · Bruut OpenAgbot</div>
+    <h1>Motorboom op de Classic</h1>
+    <p class="standfirst">Elf draden uit één wiel, acht die aangesloten worden en drie die los blijven. De temperatuurdraad blijft er op jouw verzoek uit — wat dat kost staat onderaan.</p>
+    <div class="idline">
+      <span><b>Motor</b> Quinder 8&Prime; 48V 550W · 10101025</span>
+      <span><b>Controller</b> VESC Classic 100V</span>
+      <span><b>Boom</b> 3 × 2,5 mm² + 8 × 0,14 mm² · 200 mm</span>
+      <span><b>15 sep 2026</b></span>
+    </div>
+  </header>
+
+  <div class="alarm">
+    <div class="mark">!</div>
+    <h3>Blauw, groen en geel zitten er twee keer in</h3>
+    <p>De drie fasedraden én de drie hall-signaaldraden zijn blauw, groen en geel. Je onderscheidt ze alleen op dikte: <b>2,5 mm² is fase, 0,14 mm² is hall</b>. Zet 48 V fasespanning op een hall-ingang en de sensoren in het wiel zijn weg — en die zitten binnen de naaf.</p>
+  </div>
+
+  <section>
+    <h2>Het schema<span class="note">8 aangesloten · 3 los</span></h2>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 1000 600" role="img" aria-label="Bedradingsschema: drie dikke fasedraden blauw, groen en geel gaan naar de bullet-uitgangen U, V en W van de VESC Classic; vijf dunne halldraden rood, blauw, groen, geel en zwart gaan naar de zespolige sensorconnector op respectievelijk plus 5 volt, H1, H2, H3 en GND; pin 5 TEMP blijft leeg; de witte, paarse en oranje draad worden niet aangesloten en los afgewerkt.">
+          <defs>
+            <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <!-- motor -->
+          <rect x="16" y="64" width="126" height="510" rx="10" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.5"></rect>
+          <text transform="translate(72,319) rotate(-90)" text-anchor="middle" font-family="var(--f-display)" font-size="22" font-weight="600" letter-spacing="1.5" fill="currentColor">QUINDER 8&Prime; HUB</text>
+          <text transform="translate(98,319) rotate(-90)" text-anchor="middle" font-family="var(--f-mono)" font-size="10.5" fill="var(--ink-soft)">48 V · 550 W · 20 polen</text>
+
+          <!-- kabelmantel -->
+          <rect x="142" y="86" width="44" height="466" rx="8" fill="var(--steel)"></rect>
+          <text transform="translate(170,319) rotate(-90)" text-anchor="middle" font-family="var(--f-mono)" font-size="10" fill="var(--surface)">3 × 2,5 + 8 × 0,14 mm²</text>
+
+          <!-- VESC -->
+          <rect x="616" y="44" width="368" height="526" rx="12" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="638" y="80" font-family="var(--f-display)" font-size="22" font-weight="700" letter-spacing="1.2" fill="currentColor">VESC CLASSIC 100V</text>
+
+          <text x="638" y="106" font-family="var(--f-mono)" font-size="10" letter-spacing="1.4" fill="var(--ink-soft)">FASE-UITGANGEN · BULLETS 5,5 MM</text>
+
+          <!-- fasedraden -->
+          <g fill="none" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="butt">
+            <path d="M186 130 H300 V148 H669" stroke="var(--w-blue)"></path>
+            <path d="M186 168 H332 V203 H669" stroke="var(--w-green)"></path>
+            <path d="M186 206 H364 V258 H669" stroke="var(--w-yellow)"></path>
+          </g>
+          <g stroke="currentColor" stroke-width="1.5" fill="var(--surface)">
+            <circle cx="680" cy="148" r="11"></circle>
+            <circle cx="680" cy="203" r="11"></circle>
+            <circle cx="680" cy="258" r="11"></circle>
+          </g>
+          <g font-family="var(--f-body)" font-size="14" fill="currentColor">
+            <text x="702" y="153">U — fase A</text>
+            <text x="702" y="208">V — fase B</text>
+            <text x="702" y="263">W — fase C</text>
+          </g>
+
+          <!-- wire labels motorzijde -->
+          <g font-family="var(--f-mono)" font-size="11" fill="var(--ink-mid)">
+            <text x="196" y="124">blauw 2,5</text>
+            <text x="196" y="162">groen 2,5</text>
+            <text x="196" y="200">geel 2,5</text>
+            <text x="196" y="296">rood 0,14</text>
+            <text x="196" y="331">blauw 0,14</text>
+            <text x="196" y="366">groen 0,14</text>
+            <text x="196" y="401">geel 0,14</text>
+            <text x="196" y="436">zwart 0,14</text>
+          </g>
+
+          <!-- sensorconnector -->
+          <text x="638" y="320" font-family="var(--f-mono)" font-size="10" letter-spacing="1.4" fill="var(--ink-soft)">SENSORS · 6-POLIG JST-GH 1,25 MM</text>
+          <rect x="658" y="332" width="30" height="214" rx="4" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"></rect>
+
+          <g fill="none" stroke-width="2.6" stroke-linejoin="round">
+            <path d="M186 302 H396 V349 H644" stroke="var(--w-red)"></path>
+            <path d="M186 337 H424 V421 H644" stroke="var(--w-blue)"></path>
+            <path d="M186 372 H452 V457 H644" stroke="var(--w-green)"></path>
+            <path d="M186 407 H480 V493 H644" stroke="var(--w-yellow)"></path>
+            <path d="M186 442 H508 V529 H644" stroke="var(--w-black)"></path>
+          </g>
+          <g fill="currentColor">
+            <rect x="644" y="346.5" width="14" height="5"></rect>
+            <rect x="644" y="382.5" width="14" height="5"></rect>
+            <rect x="644" y="418.5" width="14" height="5"></rect>
+            <rect x="644" y="454.5" width="14" height="5"></rect>
+            <rect x="644" y="490.5" width="14" height="5"></rect>
+            <rect x="644" y="526.5" width="14" height="5"></rect>
+          </g>
+          <g font-family="var(--f-mono)" font-size="13" fill="currentColor">
+            <text x="700" y="354">6 · +5V</text>
+            <text x="700" y="390" fill="var(--ink-soft)">5 · TEMP</text>
+            <text x="700" y="426">4 · H1</text>
+            <text x="700" y="462">3 · H2</text>
+            <text x="700" y="498">2 · H3</text>
+            <text x="700" y="534">1 · GND</text>
+          </g>
+          <text x="778" y="390" font-family="var(--f-body)" font-size="12.5" font-style="italic" fill="var(--ink-soft)">leeg laten</text>
+
+          <!-- niet aansluiten -->
+          <text x="497" y="474" font-family="var(--f-mono)" font-size="10" letter-spacing="1.4" fill="var(--ink-soft)">NIET AANSLUITEN · ELK APART AFGEWERKT</text>
+          <g fill="none">
+            <path d="M186 496 H520" stroke="var(--w-stroke)" stroke-width="4.2"></path>
+            <path d="M186 496 H520" stroke="var(--w-white)" stroke-width="2.6"></path>
+            <path d="M186 524 H520" stroke="var(--w-purple)" stroke-width="2.6"></path>
+            <path d="M186 552 H520" stroke="var(--w-orange)" stroke-width="2.6"></path>
+          </g>
+          <g fill="var(--ink-soft)" stroke="none">
+            <rect x="520" y="489" width="15" height="14" rx="3"></rect>
+            <rect x="520" y="517" width="15" height="14" rx="3"></rect>
+            <rect x="520" y="545" width="15" height="14" rx="3"></rect>
+          </g>
+          <g font-family="var(--f-mono)" font-size="11" fill="var(--ink-soft)">
+            <text x="545" y="500">wit</text>
+            <text x="545" y="528">paars</text>
+            <text x="545" y="556">oranje</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>Acht draden, twee bestemmingen.</b> De drie dikke naar de bullets U/V/W, vijf dunne naar de zespolige sensorconnector aan de kopse kant van het board. Pin 5 (TEMP) blijft leeg en pin-voor-pin is de enige nummering die telt — de namen staan naast de connector op de print gedrukt met pin 1 gemarkeerd, controleer die markering voordat je krimpt.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Draad voor draad<span class="note">functies uit de Quinder-spec, tabel 二</span></h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Draad</th>
+            <th>Ø mm²</th>
+            <th>Functie volgens motorspec</th>
+            <th>Op de VESC</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="wire"><span class="chip fat c-blue"></span>Blauw</span></td>
+            <td class="thick-cell">2,5</td>
+            <td>Motorfase A</td>
+            <td class="term">bullet U</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip fat c-green"></span>Groen</span></td>
+            <td class="thick-cell">2,5</td>
+            <td>Motorfase B</td>
+            <td class="term">bullet V</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip fat c-yellow"></span>Geel</span></td>
+            <td class="thick-cell">2,5</td>
+            <td>Motorfase C</td>
+            <td class="term">bullet W</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip c-red"></span>Rood</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Hall sensor + <span style="color:var(--ink-soft)">(4,3 V)</span></td>
+            <td class="term">SENSORS pin 6 · +5V</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip c-blue"></span>Blauw</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Hall signaal A</td>
+            <td class="term">SENSORS pin 4 · H1</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip c-green"></span>Groen</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Hall signaal B</td>
+            <td class="term">SENSORS pin 3 · H2</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip c-yellow"></span>Geel</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Hall signaal C</td>
+            <td class="term">SENSORS pin 2 · H3</td>
+          </tr>
+          <tr>
+            <td><span class="wire"><span class="chip c-black"></span>Zwart</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Hall sensor −</td>
+            <td class="term">SENSORS pin 1 · GND</td>
+          </tr>
+          <tr class="off">
+            <td><span class="wire"><span class="chip c-white"></span>Wit</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Toerentalpuls, 6 per omwenteling</td>
+            <td class="term">—</td>
+          </tr>
+          <tr class="off">
+            <td><span class="wire"><span class="chip c-purple"></span>Paars</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>Temperatuursignaal, 4,8 → 0,67 V</td>
+            <td class="term">—</td>
+          </tr>
+          <tr class="off">
+            <td><span class="wire"><span class="chip c-orange"></span>Oranje</span></td>
+            <td class="thick-cell">0,14</td>
+            <td>staat niet in de functietabel</td>
+            <td class="term">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose">De hall-volgorde is niet kritisch. Blauw&nbsp;→&nbsp;H1, groen&nbsp;→&nbsp;H2, geel&nbsp;→&nbsp;H3 is netjes en volgt de spec, maar de FOC-detectie meet de tabel zelf uit en accepteert elke permutatie. Wat wél kritisch is: <b>rood op +5V en zwart op GND</b>. De Quinder-spec is daar expliciet over — plus en min verwisselen sloopt de hall-sensoren.</p>
+  </section>
+
+  <section>
+    <h2>Oriëntatie van de sensorconnector<span class="note">tabel 2, VESC Classic datasheet</span></h2>
+    <figure>
+      <div class="frame">
+        <svg class="face" viewBox="0 0 400 150" role="img" aria-label="Aanzicht van de zespolige sensorconnector: pin 1 GND, pin 2 H3, pin 3 H2, pin 4 H1, pin 5 TEMP blijft leeg, pin 6 plus 5 volt.">
+          <polygon points="46,16 58,16 52,26" fill="var(--accent)"></polygon>
+          <text x="52" y="12" text-anchor="middle" font-family="var(--f-mono)" font-size="10" fill="var(--accent)">1</text>
+          <rect x="28" y="32" width="220" height="52" rx="5" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.5"></rect>
+          <g fill="var(--surface)" stroke="currentColor" stroke-width="1.2">
+            <rect x="38" y="42" width="22" height="32" rx="2"></rect>
+            <rect x="72" y="42" width="22" height="32" rx="2"></rect>
+            <rect x="106" y="42" width="22" height="32" rx="2"></rect>
+            <rect x="140" y="42" width="22" height="32" rx="2"></rect>
+            <rect x="174" y="42" width="22" height="32" rx="2"></rect>
+            <rect x="208" y="42" width="22" height="32" rx="2"></rect>
+          </g>
+          <g font-family="var(--f-mono)" font-size="11" text-anchor="middle" fill="currentColor">
+            <text x="49" y="102">GND</text>
+            <text x="83" y="102">H3</text>
+            <text x="117" y="102">H2</text>
+            <text x="151" y="102">H1</text>
+            <text x="185" y="102" fill="var(--ink-soft)">TEMP</text>
+            <text x="219" y="102">+5V</text>
+          </g>
+          <g font-family="var(--f-mono)" font-size="10" text-anchor="middle" fill="var(--ink-soft)">
+            <text x="49" y="120">1</text>
+            <text x="83" y="120">2</text>
+            <text x="117" y="120">3</text>
+            <text x="151" y="120">4</text>
+            <text x="185" y="120">5</text>
+            <text x="219" y="120">6</text>
+          </g>
+          <g stroke="var(--w-stroke)" stroke-width="1" stroke-dasharray="3 3">
+            <line x1="185" y1="84" x2="185" y2="92"></line>
+          </g>
+          <text x="262" y="56" font-family="var(--f-body)" font-size="12.5" fill="var(--ink-mid)">pin 5 krijgt</text>
+          <text x="262" y="72" font-family="var(--f-body)" font-size="12.5" fill="var(--ink-mid)">geen draad</text>
+        </svg>
+      </div>
+      <figcaption>De 1&ndash;6 uit tabel 2 van de datasheet. Op de print staat de rij namen naast de connector geëtst, gelezen van de andere kant — <b>ga altijd van de pin&nbsp;1-markering uit, niet van de leesrichting</b>. Krimp de vijf contacten, laat positie 5 open in de behuizing.</figcaption>
+    </figure>
+    <div class="callout">
+      <div class="lbl">Instelling die hierbij hoort</div>
+      <p>Omdat paars er nu uit blijft, moet <span class="term">Motor Temp Sensor</span> in VESC Tool op <span class="term">Disabled</span> staan. Laat je hem aan, dan leest de VESC een open TEMP-pin — met een 10k pull-up naar 3,3 V betekent dat &ldquo;koud&rdquo;, of een onbegrijpelijke fout, precies wanneer je het niet wilt. En <span class="term">Sensor Port Mode</span> op <span class="term">Hall</span>: bij 6 km/h zit je rond 3 900 ERPM en is sensorloos daar onbetrouwbaar.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>De drie losse einden</h2>
+    <div class="ends">
+      <div class="end">
+        <div class="hdr"><span class="chip c-white"></span><span class="name">Wit</span></div>
+        <div class="verdict">overbodig</div>
+        <p>Toerentalpuls, 6 per omwenteling. De VESC telt zelf via de halls: 20 polen geeft 60 pulsen per omwenteling, tienmaal fijner. Sluit je niets aan, verlies je niets.</p>
+      </div>
+      <div class="end">
+        <div class="hdr"><span class="chip c-purple"></span><span class="name">Paars</span></div>
+        <div class="verdict">jouw keuze</div>
+        <p>Temperatuursignaal. Geen NTC maar een actieve uitgang, dus hij kan niet op pin 5 — dat zou tegen de pull-up in vechten. Wil je hem later toch, dan gaat hij via een 2:1-deler naar AD2 op de IO-connector.</p>
+      </div>
+      <div class="end">
+        <div class="hdr"><span class="chip c-orange"></span><span class="name">Oranje</span></div>
+        <div class="verdict">onbekend</div>
+        <p>Zit wel in de kabeldoorsnede van de spec maar niet in de functietabel. Meet hem door voordat je hem afknipt: weerstand naar zwart, naar rood, en of hij meebeweegt als je het wiel draait.</p>
+      </div>
+    </div>
+    <p class="prose">Werk ze <b>elk afzonderlijk</b> af met krimpkous — niet als bundel, niet samen in één kous. Ze liggen in een IP66-machine naast 48 V; twee losse koperen einden die elkaar in een trillend frame vinden is precies het scenario dat je niet wil. Label ze, want over een half jaar weet je niet meer welke welke was.</p>
+  </section>
+
+  <section>
+    <h2>Aansluitvolgorde<span class="note">accu los tot stap 6</span></h2>
+    <ol class="steps">
+      <li>
+        <div class="what">
+          <strong>Sorteer op dikte, niet op kleur.</strong>
+          <span class="why">Leg de drie 2,5 mm² apart van de acht 0,14 mm² vóór je iets anders doet. Dit is de enige stap waar de fout onomkeerbaar is.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Controleer de halls met een multimeter.</strong>
+          <span class="why">Externe 5 V op rood en zwart, dan blauw, groen en geel elk ten opzichte van zwart meten terwijl je het wiel langzaam met de hand draait. Elke draad moet netjes tussen ~0 V en ~5 V schakelen. Doet één dat niet, dan is er iets mis met de sensor of met je draadtoewijzing — kom daar nu achter, niet als de FOC-detectie faalt.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Krimp de sensorconnector.</strong>
+          <span class="why">JST-GH 1,25 mm, vijf contacten op positie 1, 2, 3, 4 en 6. 0,14 mm² is dun — gebruik een tang die voor deze contacten bedoeld is en trek elk contact na het krimpen los aan de draad, niet aan de isolatie.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Bullets op de drie fasedraden.</strong>
+          <span class="why">Solderen of persen, dan elke bullet apart in krimpkous — nooit drie naakte bullets naast elkaar. De boom is maar 200 mm, dus je hebt een verlengstuk nodig; 2,5 mm² is ruim voldoende voor de 20 A die deze motor maximaal vraagt.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Route de halls weg bij de fasedraden.</strong>
+          <span class="why">In de verlenging: de vijf halldraden getwist en, als het kan, afgeschermd met de afscherming aan de VESC-kant op GND. Kruis ze haaks waar ze de fasekabels moeten passeren. Hall-signalen zijn digitaal en tolerant, maar 30 kHz schakelende 48 V op 200 mm afstand is geen theoretisch probleem.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Wiel vrij van de grond, dan pas spanning erop.</strong>
+          <span class="why">Accu erop via de XT90-S, power button indrukken, USB-C naar VESC Tool. Als de VESC vanaf een labvoeding loopt: laptop op accu, niet aan de netadapter — anders maak je een aardlus door de USB-kabel.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>FOC-wizard, daarna hall-detectie.</strong>
+          <span class="why">De detectie meet R, L en de flux linkage, en leest vervolgens de hall-tabel uit. Komt er een tabel met plausibele hoeken uit, dan klopt je bedrading. Komt er onzin uit, dan zit er een halldraad verkeerd — de fasedraden zijn dan níet de verdachte.</span>
+        </div>
+      </li>
+      <li>
+        <div class="what">
+          <strong>Draait hij verkeerd om? Wissel twee fasedraden.</strong>
+          <span class="why">Twee van de drie bullets omwisselen keert de draairichting. Doe dit niet met de halls, en zet daarna de detectie opnieuw aan. Kan ook in software met <span class="term">Invert Motor Direction</span>, maar bij twee wielen is fysiek spiegelen overzichtelijker.</span>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Wat het weglaten van paars je kost</h2>
+    <p class="prose">De motorspec zet de waarschuwing op 105 °C en de afslag op 110 °C, en dat signaal is nu niet aangesloten. De VESC ziet vanaf nu alleen zijn eigen FET-temperatuur — en die zegt weinig over een wikkeling die in een geblokkeerd wiel staat te koken. Je vangnet is daarmee volledig de stroomlimiet.</p>
+    <p class="prose">Dat is verdedigbaar, want die driewaardige uitgang gaf je onder 105 °C toch geen enkele informatie: je zag een langzame opwarming niet aankomen, en 105 °C is voor een wikkeling al fors. Maar het betekent dat de limieten uit het eerste bouwblad geen startwaarden meer zijn maar je enige beveiliging. Concreet: houd <span class="term">Motor Current Max</span> op 15 A, laat een stallteller in je ROS-laag op de eRPM meekijken, en til de limiet alleen tijdelijk en onder toezicht naar 20 A.</p>
+    <pre>SENSORS (6-polig)              BULLETS
+rood   (Hall +) ── pin 6 +5V   blauw 2,5 ── U
+blauw  (sig A)  ── pin 4 H1    groen 2,5 ── V
+groen  (sig B)  ── pin 3 H2    geel  2,5 ── W
+geel   (sig C)  ── pin 2 H3
+zwart  (Hall −) ── pin 1 GND   LOS
+                   pin 5 leeg  wit · paars · oranje</pre>
+  </section>
+
+  <footer>
+    <span>Bronnen: Quinder 8&Prime; 48V spec ver. 2024-01A, kabeltabel 二 en doorsnedetekening</span>
+    <span>VESC Classic 100V datasheet, rev. april 2026, tabel 2</span>
+  </footer>
+
+</div>
