@@ -69,3 +69,10 @@ the turn the robot has that same 2 m of straight run-in to settle dead straight
 on the new line before the crop begins.
 
 Pick the field in the web interface under **Landbouw** and press start.
+
+> [!WARNING]
+> **Disclaimer: use at your own risk**
+> - This is an experimental prototype under active development, not a finished or certified product.
+> - All software and designs are open source (AGPL-3.0) and provided **"as is"**, without warranty of any kind. The makers and contributors are not liable for any damage, injury or loss resulting from their use (see sections 15 and 16 of the license).
+> - Autonomous machines can behave unexpectedly, for example by driving into a ditch or water. Always supervise the robot, test at low speed, use a physical emergency stop, an RC failsafe and a geofence, and keep people and animals at a safe distance.
+> - You are responsible for complying with local laws and safety regulations. Do not use the robot on public roads.
