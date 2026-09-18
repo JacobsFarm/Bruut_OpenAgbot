@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Schuifregelaar voor een VESC over CAN.
+
+Stuurt SET_RPM op 50 Hz naar een VESC en leest Status 1, 4 en 5 terug.
+Wiel vrij van de grond voordat je dit draait.
+
+    sudo ip link set can0 up type can bitrate 500000
+    pip install python-can
+    python3 vesc_slider.py
+"""
+
+import struct
+import threading
+import time
+import tkinter as tk
+
+import can
+
+# --- opstelling ------------------------------------------------------------
+CHANNEL = "can0"
+VESC_ID = 1
+
+POLE_PAIRS = 10       # Quinder 8": 20 polen
+GEAR_RATIO = 5.0      # 5:1 reductie
+WHEEL_CIRC_M = 0.638  # pi * 0,2032 m; kalibreer op een gemeten 10 m
+
+ERPM_MAX = 3000       # 60 rpm wiel, 0,64 m/s
+SEND_HZ = 50          # timeout in de VESC staat op 1000 ms
+SLEW_ERPM_PER_S = 3000  # volle schaal in een seconde, geen schokken
+BRAKE_A = 3.0         # remstroom bij stoppen en afsluiten
+
+# --- CAN-pakket-ID's uit bldc/datatypes.h ----------------------------------
+SET_CURRENT_BRAKE = 2
+SET_RPM = 3
+STATUS_1 = 9
+STATUS_2 = 14
+STATUS_3 = 15
+STATUS_4 = 16
+STATUS_5 = 27
+
+# stappen per wielomwenteling: 6 per elektrische omwenteling
+TACHO_PER_REV = 6 * POLE_PAIRS * GEAR_RATIO
+
+
+class Vesc:
+    def __init__(self, channel, vesc_id):
+        self.bus = can.Bus(channel=channel, interface="socketcan")
+        self.id = vesc_id
+        self.target = 0.0  # gevraagde eRPM, gezet door de schuif
+        self.sent = 0.0    # werkelijk verstuurde eRPM, na afvlakking
+        self.tele = {"erpm": 0, "current": 0.0, "duty": 0.0, "volt": 0.0,
+                     "temp": 0.0, "amps_in": 0.0, "tacho": 0,
+                     "ah": 0.0, "ah_chg": 0.0, "wh": 0.0, "wh_chg": 0.0}
+        self.last_rx = None  # tijdstip van het laatste bericht van deze VESC
+        self.tacho_zero = None
+        self.running = True
+        threading.Thread(target=self._tx, daemon=True).start()
+        threading.Thread(target=self._rx, daemon=True).start()
+
+    def _frame(self, cmd, payload):
+        return can.Message(arbitration_id=(cmd << 8) | self.id,
+                           data=payload, is_extended_id=True)
+
+    def _tx(self):
+        """Blijft sturen, ook bij nul. Stopt dit, dan remt de VESC af."""
+        dt = 1.0 / SEND_HZ
+        step = SLEW_ERPM_PER_S * dt
+        while self.running:
+            delta = self.target - self.sent
+            self.sent += max(-step, min(step, delta))
+            try:
+                self.bus.send(self._frame(SET_RPM, struct.pack(">i", int(self.sent))))
+            except can.CanError:
+                pass  # bus even vol of down; volgende tik opnieuw
+            time.sleep(dt)
+
+    def _rx(self):
+        while self.running:
+            msg = self.bus.recv(timeout=0.5)
+            if msg is None or not msg.is_extended_id or len(msg.data) < 8:
+                continue
+            if (msg.arbitration_id & 0xFF) != self.id:
+                continue
+
+            self.last_rx = time.monotonic()
+            cmd = msg.arbitration_id >> 8
+            if cmd == STATUS_1:
+                erpm, cur, duty = struct.unpack(">ihh", msg.data)
+                self.tele.update(erpm=erpm, current=cur / 10.0, duty=duty / 1000.0)
+            elif cmd == STATUS_2:
+                ah, ah_chg = struct.unpack(">ii", msg.data)
+                self.tele.update(ah=ah / 1e4, ah_chg=ah_chg / 1e4)
+            elif cmd == STATUS_3:
+                wh, wh_chg = struct.unpack(">ii", msg.data)
+                self.tele.update(wh=wh / 1e4, wh_chg=wh_chg / 1e4)
+            elif cmd == STATUS_4:
+                t_fet, _t_mot, i_in, _pos = struct.unpack(">hhhh", msg.data)
+                self.tele.update(temp=t_fet / 10.0, amps_in=i_in / 10.0)
+            elif cmd == STATUS_5:
+                tacho, v_in, _res = struct.unpack(">ihh", msg.data)
+                if self.tacho_zero is None:
+                    self.tacho_zero = tacho
+                self.tele.update(tacho=tacho - self.tacho_zero, volt=v_in / 10.0)
+
+    def brake(self):
+        self.target = 0.0
+        self.sent = 0.0
+        payload = struct.pack(">i", int(BRAKE_A * 1000))
+        for _ in range(5):
+            try:
+                self.bus.send(self._frame(SET_CURRENT_BRAKE, payload))
+            except can.CanError:
+                pass
+            time.sleep(0.02)
+
+    def close(self):
+        self.brake()
+        self.running = False
+        time.sleep(2.0 / SEND_HZ)
+        self.bus.shutdown()
+
+
+def main():
+    vesc = Vesc(CHANNEL, VESC_ID)
+
+    root = tk.Tk()
+    root.title(f"VESC {VESC_ID}")
+
+    frame = tk.Frame(root, padx=16, pady=14)
+    frame.pack()
+
+    slider = tk.Scale(frame, from_=-ERPM_MAX, to=ERPM_MAX, resolution=10,
+                      orient=tk.HORIZONTAL, length=520, label="eRPM",
+                      command=lambda v: setattr(vesc, "target", float(v)))
+    slider.pack()
+
+    def stop(_event=None):
+        slider.set(0)
+        vesc.brake()
+
+    tk.Button(frame, text="STOP   (spatie)", command=stop,
+              height=2, width=20).pack(pady=(8, 12))
+    root.bind("<space>", stop)
+
+    readout = tk.Label(frame, font=("monospace", 11), justify=tk.LEFT)
+    readout.pack()
+
+    def refresh():
+        t = vesc.tele
+        wheel_rpm = t["erpm"] / (POLE_PAIRS * GEAR_RATIO)
+        speed = wheel_rpm / 60.0 * WHEEL_CIRC_M
+        dist = t["tacho"] / TACHO_PER_REV * WHEEL_CIRC_M
+        if vesc.last_rx is None:
+            link = "geen berichten ontvangen"
+        else:
+            age = time.monotonic() - vesc.last_rx
+            link = f"{age * 1000:5.0f} ms geleden" + ("   VERBINDING WEG" if age > 1.0 else "")
+        readout.config(text=(
+            f"laatste bericht {link}\n"
+            f"\n"
+            f"gevraagd   {vesc.sent:8.0f} eRPM\n"
+            f"gemeten    {t['erpm']:8d} eRPM   {wheel_rpm:6.1f} rpm wiel\n"
+            f"snelheid   {speed:8.2f} m/s    {speed * 3.6:6.2f} km/h\n"
+            f"afstand    {dist:8.2f} m\n"
+            f"\n"
+            f"duty       {t['duty'] * 100:8.1f} %\n"
+            f"motor      {t['current']:8.1f} A\n"
+            f"accu       {t['amps_in']:8.1f} A     {t['volt']:6.1f} V\n"
+            f"FET        {t['temp']:8.1f} °C\n"
+            f"\n"
+            f"verbruikt  {t['ah']:8.3f} Ah    {t['wh']:7.2f} Wh\n"
+            f"regen      {t['ah_chg']:8.3f} Ah    {t['wh_chg']:7.2f} Wh"
+        ))
+        root.after(100, refresh)
+
+    refresh()
+
+    def on_close():
+        vesc.close()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
