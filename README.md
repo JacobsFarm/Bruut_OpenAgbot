@@ -6,7 +6,8 @@ Visit the website for more information https://jacobsfarm.github.io/Bruut_openag
 
 newest configuration the 2WD: with AB line driving
 <img width="4000" height="2250" alt="DJI_0523" src="https://github.com/user-attachments/assets/4cc46809-3ec2-4927-9e47-56f9b0d914db" />
-<img width="4080" height="3072" alt="PXL_20260816_183624926" src="https://github.com/user-attachments/assets/c81b0a46-ca6d-4342-92a0-46ce6de51545" />
+<img width="1434" height="1080" alt="dasgewagergsdg" src="https://github.com/user-attachments/assets/1d894250-b270-43b1-836e-3cf6760740ba" />
+
 
 
 This repo contains all the code information and code for the Agbot bruut Project 
