@@ -128,7 +128,10 @@ def get_status():
         # kopakker rijdt - handig om straks een werktuig aan te koppelen.
         "ab_baan_nr": ab_navigator.order_index + 1 if ab_navigator.is_active else 0,
         "ab_totaal_banen": len(ab_navigator.swath_order),
-        "ab_in_werkzone": ab_navigator.in_werkzone
+        "ab_in_werkzone": ab_navigator.in_werkzone,
+        # Kort overzicht van de aandrijving; alles staat in /api/motors.
+        "drive_fault": vehicle_controller.drive_fault,
+        "accu_v": vehicle_controller.motor_controller.battery_voltage()
     })
     return pos
 
@@ -151,8 +154,29 @@ def manual_drive(cmd: ManualDriveCommand):
     # van zijn bereik niets omdat de VehicleController het toch afkapt.
     max_angle = vehicle_controller.max_center_angle
     actual_angle = (cmd.steering_percentage / 100.0) * max_angle
-    vehicle_controller.drive(cmd.speed_kmh, actual_angle)
+    # Handmatig mag achteruit (negatieve speed_kmh); de navigators rijden alleen
+    # vooruit. Dodemansknop: de frontend herhaalt dit commando zolang er gereden
+    # wordt; valt dat weg (wifi, telefoon op slot), dan stopt hij vanzelf.
+    vehicle_controller.drive(cmd.speed_kmh, actual_angle, allow_reverse=True,
+                             timeout_s=vehicle_controller.manual_timeout_s)
+    fout = vehicle_controller.drive_fault
+    if fout:
+        return {"status": "blocked", "msg": fout}
     return {"status": "driving"}
+
+@router.get("/motors")
+def motors_status():
+    """
+    Alle telemetrie van beide VESC's (per wiel onder 'wheels'), de totalen van
+    de accu, de grenzen in eRPM en km/h, en wat de regellus nu vraagt.
+    """
+    return vehicle_controller.status()
+
+@router.post("/motors/reset")
+def motors_reset():
+    """Vrijgeven na een stall of oververhitting; het voertuig blijft staan tot het volgende commando."""
+    vehicle_controller.reset_drive_faults()
+    return {"status": "reset", "fault": vehicle_controller.drive_fault}
 
 @router.post("/steering/enable")
 def toggle_steering(cmd: SteeringEnableCommand):

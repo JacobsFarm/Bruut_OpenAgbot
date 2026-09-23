@@ -1,5 +1,11 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
+    import { motors, fmt, grensOmhoog, grensOmlaag } from '../lib/telemetry.js';
+
+    // Snelheidsbereik van de aandrijving (min/max eRPM in de VESC-config).
+    // Daarbuiten rijdt hij toch op de grens, dus de schuiven lopen niet verder.
+    $: minKmh = grensOmhoog($motors.data?.limits?.min_kmh ?? 0.5);
+    $: maxKmh = grensOmlaag($motors.data?.limits?.max_kmh ?? 7.0);
 
     let werkbreedte = 4.0;
     let veldlengte = 50.0;
@@ -339,9 +345,9 @@
             </p>
 
             <div class="slider-group">
-                <label for="snelheid">Werksnelheid (km/h)</label>
+                <label for="snelheid">Werksnelheid (km/h, {fmt(minKmh, 1)} - {fmt(maxKmh, 1)})</label>
                 <div class="regel">
-                    <input id="snelheid" type="range" min="0.5" max="7.0" step="0.1"
+                    <input id="snelheid" type="range" min={minKmh} max={maxKmh} step="0.1"
                            bind:value={snelheid} on:change={updateLijnvolging}>
                     <input class="getal" type="number" min="0" step="0.1"
                            bind:value={snelheid} on:change={updateLijnvolging}>
@@ -358,7 +364,7 @@
             <div class="slider-group">
                 <label>
                     Bochtsnelheid: {bochtSnelheid.toFixed(1)} km/h
-                    <input type="range" min="0.5" max="5.0" step="0.1" bind:value={bochtSnelheid} on:change={updateLijnvolging}>
+                    <input type="range" min={minKmh} max={maxKmh} step="0.1" bind:value={bochtSnelheid} on:change={updateLijnvolging}>
                 </label>
             </div>
         </div>

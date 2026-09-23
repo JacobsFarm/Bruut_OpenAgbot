@@ -1,10 +1,27 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
+    import { motors, status, postJson, fmt, grensOmlaag } from '../lib/telemetry.js';
 
     let linksVast = true;
     let rechtsVast = true;
     let stuurPercentage = 0.0;
-    let snelheid = 0.0;
+    let snelheid = 0.0;      // km/h, negatief = achteruit
+    let blokkade = null;     // waarom de aandrijving het laatste commando weigerde
+
+    // Grenzen uit de VESC-config van de backend; tot die binnen zijn de
+    // waarden van nu (900 / 3000 / 1500 eRPM).
+    $: grenzen = $motors.data?.limits;
+    $: maxVooruit = grensOmlaag(grenzen?.max_kmh ?? 4.6);
+    $: maxAchteruit = grensOmlaag(grenzen?.max_reverse_kmh ?? 2.3);
+    $: minKmh = grenzen?.min_kmh ?? 1.4;
+    $: timeoutS = $motors.data?.drive?.manual_timeout_s ?? 1.5;
+    // Onder het minimum van de VESC draait een wiel niet; de backend rijdt
+    // dan op het minimum. Laat zien wat hij werkelijk gaat doen.
+    $: effectief = snelheid === 0 ? 0 : Math.sign(snelheid) * Math.max(Math.abs(snelheid), minKmh);
+
+    $: wielen = $motors.data?.wheels;
+    $: accu = $motors.data?.battery;
+    $: accuPct = (accu?.soc_pct ?? null) === null ? '' : ` (${accu.soc_pct} %)`;
 
     // Live uitgelezen stand van de twee voorwielen
     let hoekLinks = null;
@@ -40,21 +57,49 @@
         }
     }
 
+    // Dodemansknop: zolang er gereden wordt herhalen we het commando. Valt dat
+    // weg (wifi, telefoon op slot, ander tabblad), dan stopt de robot na
+    // manual_timeout_s uit zichzelf.
+    let hartslag;
+    function hartslagTik() {
+        if (snelheid !== 0) stuurCommando();
+        hartslag = setTimeout(hartslagTik, Math.max(100, Math.min(400, timeoutS * 1000 / 3)));
+    }
+
     onMount(() => {
         haalStatus();
         statusTimer = setInterval(haalStatus, 2000);
+        hartslagTik();
     });
 
-    onDestroy(() => clearInterval(statusTimer));
+    onDestroy(() => {
+        clearInterval(statusTimer);
+        clearTimeout(hartslag);
+        // Weg van dit scherm is niet meer aan het stuur: netjes laten afremmen.
+        if (snelheid !== 0) {
+            snelheid = 0;
+            stuurCommando();
+        }
+    });
 
     async function stuurCommando() {
         try {
-            await fetch('/api/nav/manual_drive', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ speed_kmh: snelheid, steering_percentage: stuurPercentage })
-            });
+            const data = await postJson('/api/nav/manual_drive',
+                { speed_kmh: snelheid, steering_percentage: stuurPercentage });
+            if (data.status === 'blocked') {
+                // De aandrijving weigert. Schuif terug naar 0, zodat hij na het
+                // vrijgeven niet vanzelf weer wegrijdt op de oude stand.
+                blokkade = data.msg;
+                snelheid = 0;
+            } else {
+                blokkade = null;
+            }
         } catch(e) {}
+    }
+
+    function snelheidNul() {
+        snelheid = 0;
+        stuurCommando();
     }
 
     async function zetVast(wheel, vast) {
@@ -167,11 +212,34 @@
     </div>
 
     <div class="slider-box">
+        <div class="live">
+            <span>GPS <b>{fmt($status.data?.speed_kmh, 1)}</b> km/h</span>
+            <span>Wielen <b>{fmt(wielen?.left?.speed_kmh, 1)} / {fmt(wielen?.right?.speed_kmh, 1)}</b> km/h</span>
+            <span>Accu <b>{fmt(accu?.voltage_v, 1)} V</b>{accuPct}</span>
+        </div>
+
+        {#if blokkade}
+            <p class="waarschuwing">Rijden geweigerd: {blokkade}</p>
+        {/if}
+
         <div class="slider-container">
             <label>
-                Snelheid: {snelheid.toFixed(1)} km/h
-                <input type="range" min="0" max="7" step="0.1" bind:value={snelheid} on:input={stuurCommando}>
+                {snelheid > 0 ? 'Vooruit' : snelheid < 0 ? 'Achteruit' : 'Stil'}: {Math.abs(snelheid).toFixed(1)} km/h
+                {#if effectief !== snelheid}
+                    <span class="subtiel">(rijdt {Math.abs(effectief).toFixed(1)} km/h, het minimum van de VESC)</span>
+                {/if}
+                <input type="range" min={-maxAchteruit} max={maxVooruit} step="0.1"
+                       bind:value={snelheid} on:input={stuurCommando}>
             </label>
+            <div class="schaal">
+                <span>achteruit tot {maxAchteruit.toFixed(1)}</span>
+                <span>vooruit tot {maxVooruit.toFixed(1)} km/h</span>
+            </div>
+            <button class="center-btn" on:click={snelheidNul}>Snelheid 0</button>
+            <p class="hint">
+                Hij rijdt alleen zolang dit scherm open en verbonden is: komt er
+                {timeoutS} s geen commando binnen, dan remt hij af tot stilstand.
+            </p>
         </div>
 
         <div class="slider-container">
@@ -211,6 +279,9 @@
     .wiel-rij .btn-toggle, .wiel-rij .btn-zero { padding: 15px 12px; flex: 1; min-width: 70px; }
 
     .slider-box { background: #2a2a2a; color: white; padding: 15px; border-radius: 8px; text-align: center; }
+    .live { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 8px; background: #333; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 1.05em; }
+    .live b { font-family: monospace; font-size: 1.15em; }
+    .schaal { display: flex; justify-content: space-between; color: #9e9e9e; font-size: 0.9em; margin-top: -8px; }
     .slider-container { margin-bottom: 30px; background: #333; padding: 15px; border-radius: 8px; }
     label { display: block; margin-bottom: 15px; font-size: 1.2em; font-weight: bold; }
     input[type="range"] { width: 100%; height: 40px; cursor: pointer; }

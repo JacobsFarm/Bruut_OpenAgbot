@@ -55,14 +55,18 @@ Also check CAN_H→GND and CAN_L→GND: both must be high impedance. If not, the
 
 ## Bring it up on the Jetson
 
-The module is a gs_usb SocketCAN device — no driver to install, it appears as `can0`. VESC defaults to 500 kbit/s.
+The module is a gs_usb SocketCAN device. VESC defaults to 500 kbit/s.
+
+**On the Jetson Orin Nano (JetPack 6) the adapter is `can1`, not `can0`.** `can0` is the Orin's own CAN controller (mttcan). JetPack 6 also ships without `gs_usb`, so the driver is built with DKMS. The full steps are in [setup/information/innomaker_usb2can_jetson_setup.json](../setup/information/innomaker_usb2can_jetson_setup.json). The backend uses `vesc.can_channel` = `can1` from `data/config.json`.
 
 ```bash
-sudo ip link set can0 up type can bitrate 500000
-candump can0
+sudo ip link set can1 down
+sudo ip link set can1 type can bitrate 500000 loopback off
+sudo ip link set can1 up
+candump can1
 ```
 
-`restart-ms` is not supported by gs_usb — `ip link set can0 up` fails with *"Device doesn't support restart from Bus Off"* if you pass it. Recovery from bus-off has to be done in software instead.
+`restart-ms` is not supported by gs_usb — `ip link set can1 up` fails with *"Device doesn't support restart from Bus Off"* if you pass it. After a bus-off, take the interface down and up again with the commands above.
 
 ## VESC Tool
 

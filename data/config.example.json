@@ -5,16 +5,29 @@
   "hardware": {
     "gps_port": "/dev/ttyACM2",
     "gps_heading_port": "/dev/ttyACM1",
-    "gps_baudrate": 115200, 
-    "arduino_dac_port": "/dev/ttyACM3", 
-    "arduino_dac_baudrate": 115200,
-    "arduino_stepper_port": "/dev/ttyACM0", 
+    "gps_baudrate": 115200,
+    "arduino_stepper_port": "/dev/ttyACM0",
     "arduino_stepper_baudrate": 115200
   },
   "vehicle": {
     "wheelbase_m": 1.20,
     "track_width_m": 1.00,
-    "max_wheel_diff_dac": 1000.0
+
+    "_comment_differentieel": "Achterwielen in de bocht. 1.0 = exact volgens de stuurgeometrie: het binnenwiel draait langzamer, het buitenwiel sneller (bij volle uitslag ca. -19% / +19%). 0.0 = beide wielen gekoppeld op hetzelfde toerental; dan vechten ze via de grond tegen elkaar, want een VESC houdt zijn toerental vast. Boven 1.0 duwen de achterwielen de bocht in (helpt als de voorwielen op zachte grond wegschuiven). Maximaal 2.0.",
+    "differential_gain": 1.0,
+
+    "_comment_ramp": "Optrekken en afremmen van het midden van de achteras, in m/s per seconde. Geldt voor beide wielen met dezelfde factor, zodat de bocht klopt tijdens het optrekken. Wegrijden gaat altijd in een keer naar de minimale snelheid (min_erpm); een noodstop negeert de ramp.",
+    "accel_mps2": 0.5,
+    "decel_mps2": 0.8,
+
+    "_comment_dodemansknop": "Handmatig rijden is een dodemansknop: de webinterface herhaalt het commando een paar keer per seconde zolang je rijdt. Komt er manual_timeout_s lang niets binnen (wifi weg, telefoon op slot, ander tabblad), dan remt hij af tot stilstand.",
+    "manual_timeout_s": 1.5
+  },
+  "battery": {
+    "_comment": "Alleen voor het dashboard en de ritlog. EGO 56 V, 5 Ah = 14S2P (VESC/README.md). De lading is een schatting uit de spanning; internal_resistance_ohm corrigeert de spanningsval onder stroom (zelf ijken: spanning in rust min spanning onder een bekende stroom, gedeeld door die stroom). Het verbruik komt uit de tellers van de VESC's, die op nul beginnen zodra de VESC's spanning krijgen.",
+    "cells": 14,
+    "capacity_ah": 5.0,
+    "internal_resistance_ohm": 0.2
   },
   "steering": {
     "_comment_limiet": "max_angle_degrees is de limiet per WIEL. De maximale middenhoek wordt daaruit afgeleid en ligt lager, omdat het binnenwiel bij Ackermann scherper staat.",
@@ -33,12 +46,42 @@
     "min_change_degrees": 0.1,
     "resend_interval_sec": 1.0
   },
-  "motor_control": {
-    "dac_stop": 700,
-    "dac_min_start": 1200,
-    "dac_max": 3100,
-    "max_dac_step_per_sec": 800.0,
-    "smoothing_interval_sec": 0.05
+  "vesc": {
+    "_comment_bus": "Twee VESC Classic 100V op CAN, zie VESC/README_can.md. Op de Orin Nano is can0 de eigen CAN-controller van de Jetson (mttcan); de InnoMaker USB2CAN verschijnt als can1 (setup/information/innomaker_usb2can_jetson_setup.json). De ID's zijn zoals getest met VESC/vesc_slider_2_wheels.py. Voor een slcan-adapter: can_interface 'slcan' en het tty-pad als can_channel.",
+    "can_interface": "socketcan",
+    "can_channel": "can1",
+    "can_bitrate": 500000,
+    "left_id": 1,
+    "right_id": 2,
+
+    "_comment_erpm": "Positieve eRPM = vooruit op beide wielen; de draairichting staat in de VESC zelf (Invert Motor Direction). Onder min_erpm draait een wiel niet: dat is 'Speed PID min ERPM' (s_pid_min_erpm = 900) in de VESC. Verlaag je die in VESC Tool, dan kan min_erpm mee omlaag. max_erpm mag later omhoog, maar niet boven Max ERPM in de VESC (nu 3700). max_erpm_reverse geldt alleen voor handmatig rijden; de navigatie rijdt nooit achteruit.",
+    "min_erpm": 900,
+    "max_erpm": 3000,
+    "max_erpm_reverse": 1500,
+
+    "_comment_omrekening": "10 poolparen x 5:1 kast = 50 eRPM per wiel-RPM. Omtrek van de 4.00-8 band (ca. 16 inch buitenmaat) = 1,277 m, dus 900 eRPM = 1,38 km/h en 3000 eRPM = 4,60 km/h. Kalibreren: 10 m rijden en distance_m in /api/motors vergelijken, of een omwenteling met de hand = 300 tacho-tellen.",
+    "pole_pairs": 10,
+    "gear_ratio": 5.0,
+    "wheel_circumference_m": 1.277,
+
+    "_comment_zenden": "De regellus zendt continu op send_rate_hz, ook bij stilstand; valt hij weg, dan zet de VESC-timeout (App Settings, nu 1000 ms) de motoren uit. Komt er van een VESC langer dan link_timeout_s niets binnen, dan krijgen BEIDE wielen 0, anders draait de robot om het stilstaande wiel. brake_current_a wordt alleen bij het afsluiten gebruikt, net als in het testscript.",
+    "send_rate_hz": 50,
+    "link_timeout_s": 0.5,
+    "brake_current_a": 3.0,
+
+    "safety": {
+      "_comment_stall": "Gevraagd toerental, maar het wiel haalt minder dan stall_speed_fraction daarvan terwijl de motorstroom boven stall_current_a staat: na stall_time_s stopt alles en blijft het stil tot POST /api/motors/reset.",
+      "stall_current_a": 10.0,
+      "stall_speed_fraction": 0.5,
+      "stall_time_s": 3.0,
+
+      "_comment_thermisch": "Schatting van de wikkelingtemperatuur uit de motorstroom: T += (I^2 * thermal_k - T / thermal_tau_s) * dt, bovenop ambient_c. Berekende startwaarden (ca. 60 graden boven omgeving bij 9 A continu), nog niet geijkt tegen de motorsensor. Boven motor_trip_c stopt alles tot een reset; na een herstart van de backend begint het model weer koud.",
+      "thermal_k": 0.00123,
+      "thermal_tau_s": 600,
+      "ambient_c": 25,
+      "motor_warn_c": 90,
+      "motor_trip_c": 105
+    }
   },
   "navigation": {
     "lookahead_distance_m": 3.0,

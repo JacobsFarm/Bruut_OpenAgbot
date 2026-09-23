@@ -2,6 +2,8 @@ import os
 import csv
 from datetime import datetime
 
+from app.hardware.motor_logic import LOG_COLUMNS as MOTOR_KOLOMMEN
+
 class DriveLogger:
     def __init__(self):
         self.log_file = None
@@ -21,8 +23,8 @@ class DriveLogger:
                     "Tijdstip", "Modus", "WP_Doel", "Lat", "Lon", "Fix", "HDOP",
                     "Heading_Echt", "Heading_Doel", "Heading_Fout",
                     "Stuurhoek", "Doel_kmh", "Echt_kmh",
-                    "DAC_Links", "DAC_Rechts",
-                    "Afstand_tot_WP_m", "Lookahead_m", "Loop_Tijd_s"
+                    "Afstand_tot_WP_m", "Lookahead_m", "Loop_Tijd_s",
+                    *MOTOR_KOLOMMEN
                 ])
         except Exception:
             self.log_file = None
@@ -30,11 +32,12 @@ class DriveLogger:
     def log_regel(self, modus="", wp_idx=0, lat=0.0, lon=0.0, fix=0, hdop=99.0,
                   heading_echt=0.0, heading_doel=0.0, heading_fout=0.0,
                   stuurhoek=0.0, doel_kmh=0.0, echt_kmh=0.0,
-                  dac_links=0, dac_rechts=0,
-                  dist_wp=0.0, lookahead=0.0, dt=0.0):
+                  dist_wp=0.0, lookahead=0.0, dt=0.0, motor=None):
         if not self.log_file:
             return
 
+        # Aandrijfdata van de VESC's (VehicleController.log_snapshot()).
+        motor = motor or {}
         try:
             with open(self.log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
@@ -47,11 +50,10 @@ class DriveLogger:
                     round(stuurhoek, 2) if stuurhoek else 0.0, 
                     round(doel_kmh, 2) if doel_kmh else 0.0, 
                     round(echt_kmh, 2) if echt_kmh else 0.0,
-                    int(dac_links) if dac_links else 0, 
-                    int(dac_rechts) if dac_rechts else 0,
                     round(dist_wp, 3) if dist_wp else 0.0, 
                     round(lookahead, 2) if lookahead else 0.0, 
-                    round(dt, 4) if dt else 0.0
+                    round(dt, 4) if dt else 0.0,
+                    *[motor.get(k, "") for k in MOTOR_KOLOMMEN]
                 ])
         except Exception:
             pass

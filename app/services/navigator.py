@@ -13,7 +13,7 @@ class Navigator:
     """
     De 'Routeplanner en Chauffeur' van de AgBot.
     Volgt een lijst met GPS-waypoints via het Pure Pursuit algoritme.
-    Geheel onafhankelijk van hardware-specifieke (DAC) logica.
+    Geheel onafhankelijk van hardware-specifieke (motor) logica.
     """
     def __init__(self, gps_system, vehicle_controller, config):
         self.logger = logging.getLogger(__name__)
@@ -128,6 +128,15 @@ class Navigator:
         while self.is_active and self.current_wp_index < len(self.waypoints):
             start_time = time.time()
 
+            # 0. Aandrijving in orde? CAN weg, een VESC-fout of een vastgelopen
+            #    wiel beeindigt de missie; opnieuw rijden gaat via een nieuwe start.
+            fout = self.vehicle.drive_fault
+            if fout:
+                self.state = "FOUT"
+                self.status_message = f"Aandrijving: {fout}"
+                self.logger.error(f"Navigatie gestopt, aandrijving: {fout}")
+                break
+
             # 1. Haal de nieuwste (hybride) GPS data op
             curr_pos = self.gps.get_current_position()
 
@@ -203,7 +212,8 @@ class Navigator:
                         echt_kmh=curr_pos.get("speed_kmh", 0.0),
                         dist_wp=distance,
                         lookahead=self.lookahead_distance,
-                        dt=(time.time() - start_time)
+                        dt=(time.time() - start_time),
+                        motor=self.vehicle.log_snapshot()
                     )
                 except Exception as e:
                     self.logger.error(f"Fout bij loggen: {e}")

@@ -82,8 +82,9 @@ op de seriële driver.
 
 **De timeout is de belangrijkste failsafe.** Stopt de Jetson met sturen — crash,
 kernel panic, kabel eruit getrild — dan zetten beide VESC's zichzelf na 500 ms
-uit. Dat werkt óók als deze software niet meer draait. Daarom zendt
-`app/hardware/motor_logic.py` onafgebroken op 50 Hz, ook als er niets verandert.
+uit. Dat werkt óók als deze software niet meer draait. Daarom zendt de
+regellus in `app/services/vehicle_controller.py` onafgebroken op 50 Hz, ook als
+er niets verandert.
 
 ### Waarom geen Arduino in het stuurpad
 
@@ -150,14 +151,19 @@ JST-GH, 4-polig. Tabel 2 van de VESC Classic 100V datasheet:
 De Jetson in deze machine is een **Orin Nano 16GB dev kit**.
 
 **Route A — geïsoleerde USB-CAN-adapter (aanbevolen om mee te beginnen).**
-Hij verschijnt als een gewone socketcan-interface, dus `can0` en hetzelfde
-`ip link`-commando als hieronder, en je hoeft niets aan de device tree te doen.
+Hij verschijnt als een gewone socketcan-interface en werkt met hetzelfde
+`ip link`-commando als hieronder; je hoeft niets aan de device tree te doen.
+**Op deze Orin Nano is dat `can1`**: `can0` is de eigen CAN-controller van de
+Jetson (mttcan), en JetPack 6 heeft `gs_usb` niet standaard aan boord. De
+driver wordt met DKMS gebouwd, zie
+`setup/information/innomaker_usb2can_jetson_setup.json`.
 Neem er een met echte galvanische isolatie: de bus loopt langs 48 V fasedraden,
 en de datasheet waarschuwt zelf voor aardlussen bij USB-verbindingen. Let op het
 verschil tussen twee soorten:
 
-* **gs_usb / candleLight** (bijvoorbeeld een CANable): native socketcan, werkt
-  met `can_interface: "socketcan"` en `can_channel: "can0"` uit de config.
+* **gs_usb / candleLight** (bijvoorbeeld een CANable of de InnoMaker): native
+  socketcan, werkt met `can_interface: "socketcan"` en `can_channel: "can1"`
+  uit de config.
 * **slcan** (seriële CAN over een `/dev/ttyACM*`): daar hoort `slcand` bij, of
   je zet `can_interface` op `"slcan"` met het tty-pad als `can_channel`.
 
@@ -379,11 +385,42 @@ Het Lisp-script hiervoor staat onderaan dit document.
 
 | Bestand | Rol |
 |---|---|
-| `app/hardware/vesc_can.py` | Protocol: frames bouwen en uitpakken, telemetrie per controller bijhouden |
-| `app/hardware/motor_logic.py` | De twee achterwielen als geheel: m/s ↔ eRPM, zendlus op 50 Hz, beveiligingslagen 2 en 3 |
-| `app/services/vehicle_controller.py` | Ackermann, elektronisch differentieel, acceleratiebegrenzing |
+| `app/hardware/vesc_can.py` | Protocol: frames bouwen en uitpakken, telemetrie per controller (STATUS 1–6, foutcode, herstart) |
+| `app/hardware/motor_logic.py` | De twee achterwielen als geheel: m/s ↔ eRPM, min/max eRPM, verbindingsbewaking, beveiligingslagen 2 en 3 |
+| `app/services/vehicle_controller.py` | Regellus op 50 Hz: Ackermann, elektronisch differentieel, acceleratiebegrenzing |
 | `app/hardware/stepper_logic.py` | De twee voorwielen (stappenmotoren via Arduino) — ongewijzigd |
-| `data/config.example.json` → `vesc` | Alle waarden hierboven die de software nodig heeft |
+| `data/config.example.json` → `vesc`, `vehicle` | Alle waarden hierboven die de software nodig heeft |
+
+### Rijgedrag
+
+* **Onder 900 eRPM draait een wiel niet.** Dat is `Speed PID min ERPM`
+  (`s_pid_min_erpm`) in de VESC: daaronder regelt hij niet meer en remt hij af.
+  In `config.json` staat daarom `vesc.min_erpm` 900. Een wiel staat stil of
+  draait minstens 1,38 km/h. Wegrijden gaat in één stap naar die 900 eRPM;
+  verlaag je de VESC-instelling, dan kan `min_erpm` mee omlaag en trekt hij
+  zachter op.
+* **Maximaal `vesc.max_erpm`** (nu 3 000 = 4,6 km/h). Hoger kan, maar niet
+  boven Max ERPM in de VESC zelf.
+* **Elektronisch differentieel, exact uit de stuurgeometrie.** Een VESC houdt
+  zijn toerental vast. Krijgen beide achterwielen in een bocht hetzelfde
+  toerental, dan vechten ze via de grond tegen elkaar. Bij volle uitslag draait
+  het binnenwiel ~19 % langzamer en het buitenwiel ~19 % sneller dan het midden.
+  `vehicle.differential_gain` = 0 koppelt ze alsnog.
+* **Wat niet kan, wordt opgelost met één factor voor beide wielen.** Zakt het
+  binnenwiel onder 900 of komt het buitenwiel boven `max_erpm`, dan schalen
+  beide wielen samen mee: de bocht blijft, de snelheid past zich aan. Dezelfde
+  gedeelde factor zit in de ramp (`accel_mps2`, `decel_mps2`), zodat de bocht
+  ook tijdens het optrekken klopt.
+* **Navigatie rijdt alleen vooruit**, handmatig rijden mag achteruit tot
+  `vesc.max_erpm_reverse`.
+* **Geen één-wiel-rijden.** Geeft een VESC langer dan 0,5 s geen data, meldt
+  hij een foutcode, loopt een wiel vast of wordt het model te heet, dan krijgen
+  beide wielen 0 en stopt een lopende missie. Een vastgelopen wiel of een te
+  hete motor blijft staan tot `POST /api/motors/reset`. Daarna rijdt hij pas
+  weer op een nieuw commando.
+
+Alle telemetrie staat op `GET /api/motors`. Een kort overzicht (`drive_fault`,
+`accu_v`) zit in `GET /api/status`.
 
 ### Frames
 
@@ -393,11 +430,16 @@ Extended frame, 29-bits ID = `(commando << 8) | vesc_id`, payload big-endian.
 |---|---|---|---|
 | 1 | SET_CURRENT | i32 | × 1000 (mA) |
 | 2 | SET_CURRENT_BRAKE | i32 | × 1000 |
-| 3 | SET_RPM | i32 | eRPM, geen schaal — begrens op 3 900 |
+| 3 | SET_RPM | i32 | eRPM, geen schaal — begrensd op `vesc.max_erpm` |
 | 12 | SET_CURRENT_HANDBRAKE | i32 | × 1000 |
+| 8 | PROCESS_SHORT_BUFFER | `COMM_GET_VALUES_SELECTIVE` met masker bit 15 | vraagt de foutcode op; antwoord komt in één frame terug |
 | 9 | STATUS ↓ | i32 eRPM, i16 stroom, i16 duty | ÷ 10 · ÷ 1000 |
+| 14 | STATUS_2 ↓ | i32 Ah verbruikt, i32 Ah teruggeleverd | ÷ 10 000 |
+| 15 | STATUS_3 ↓ | i32 Wh verbruikt, i32 Wh teruggeleverd | ÷ 10 000 |
 | 16 | STATUS_4 ↓ | temp FET, temp motor, stroom in, pid pos | ÷ 10 · ÷ 10 · ÷ 10 · ÷ 50 |
 | 27 | STATUS_5 ↓ | i32 tacho, i16 `v_in` | tacho: 300 = één wielomwenteling · ÷ 10 |
+| 57 | NOTIFY_BOOT ↓ | hardwarenaam in ASCII | eenmalig na elke (her)start |
+| 58 | STATUS_6 ↓ | ADC1, ADC2, ADC3, PPM | ÷ 1000; alleen als hij in de VESC aan staat |
 
 ### Twee stromen, twee betekenissen
 
@@ -419,8 +461,9 @@ Je ziet ze naast elkaar in het aandrijfpaneel van de webinterface, op
 
 > **Handbrake is een greep, geen parkeerrem.** Bij nul toeren gaat alle
 > handbrake-stroom als warmte de wikkeling in — precies het stall-scenario. De
-> software gebruikt hem daarom niet: bij stilstand gaat de stroom naar 0 en
-> rollen de wielen vrij.
+> software gebruikt hem daarom niet: bij stilstand stuurt hij SET_RPM 0, net als
+> het testscript, en onder Speed PID min ERPM remt de VESC het wiel dan af in
+> plaats van het vast te houden.
 
 ### Beveiligingslagen, op volgorde van waarde per uur werk
 
@@ -448,11 +491,16 @@ een pieklimiet, geen vrijbrief.
 50 Hz binnenkomt:
 
 ```
-T += (i_motor**2 * k_warmte - T / tau) * dt
+T += (i_motor**2 * thermal_k - T / thermal_tau_s) * dt
 ```
 
-De startwaarden in `config.example.json` (`k_warmte` 0,00123 en `tau_s` 600) zijn
+De startwaarden in `config.example.json` (`vesc.safety.thermal_k` 0,00123 en
+`thermal_tau_s` 600) zijn
 berekend, niet gemeten: ze komen uit op ~60 °C boven omgeving bij 9 A continu.
+Boven `motor_warn_c` (90 °C) komt er een waarschuwing, boven `motor_trip_c`
+(105 °C) stopt de aandrijving tot een reset. De schatting staat per wiel als
+`motor_temp_model_c` in `/api/motors` en als `Motortemp_model_L_C` / `_R_C` in
+de ritlog.
 IJk ze één keer tegen de drietrapssensor: draai op een bekende stroom tot de
 sensor bij 105 °C omslaat en noteer hoe lang dat duurde. Reken conservatief bij
 stilstand — zonder luchtstroom is `tau` langer. Log `T` mee in het veld; daarmee
@@ -493,9 +541,9 @@ tegen de 15 A motorlimiet aan dan tegen het vermogen — bovengrens, geen beloft
 
 Twee dingen volgen daaruit.
 
-**De taper op `v_in` in `config.json` is op dit pak gesneden.** 56,0 V als begin
-en 58,0 V als eind horen bij een 14S EGO; wissel je van accutype, dan moeten die
-twee mee.
+**De regen-cutoff in de VESC is op dit pak gesneden.** Battery Voltage Regen
+Cutoff 56,0 V als begin en 57,5 V als eind horen bij een 14S EGO; wissel je van
+accutype, dan moeten die twee mee.
 
 **Hangt de omvormer aan hetzelfde pak als de VESC's?** Zo ja, dan zakt je
 Jetson-voeding mee op het moment dat de aandrijving het hardst trekt — een
@@ -507,18 +555,21 @@ laagspanningsgrens niet eerder haalt dan de 42 V waarop de VESC's terugregelen.
 
 De EGO-accu néémt regen aan, maar **bij een vol pak valt de rem weg**. Dat is
 bekend EGO-gedrag en geldt voor élke volle accu. De overspanningsbeveiliging van
-de VESC helpt niet: dit is een 100 V board en je pack gaat tot 58,8 V, dus hij
-regelt uit zichzelf niets terug. Die fade moet je zelf maken — en dat doet
-`_update_regen_marge()` in `motor_logic.py`:
+de VESC helpt niet: dit is een 100 V board en je pack gaat tot 58,8 V. Wat de
+VESC wél doet is de teruglevering afbouwen via Battery Voltage Regen Cutoff.
+Het bijpassende **snelheidsplafond zit nog niet in de software**:
 
-| Gemeten `v_in` | Regen | Snelheidsplafond |
+| Gemeten `v_in` | Regen (VESC) | Snelheidsplafond (nog te bouwen) |
 |---|---|---|
 | < 56,0 V | vol | Normaal |
-| 56,0 – 58,0 V | lineair naar nul | Evenredig terug |
-| > 58,0 V | geen | Stapvoets |
+| 56,0 – 57,5 V | lineair naar nul | Evenredig terug |
+| > 57,5 V | geen | Stapvoets |
 
-Kalibreer die grenzen (`vesc.safety.regen` in de config) op wat je werkelijk
-terugleest bij een volle accu. Omdat `P = F · v` houdt dezelfde rem bij de halve
+Let bij het bouwen op dat `v_in` onder belasting inzakt en bij remmen oploopt:
+een plafond rechtstreeks op de gemeten spanning gaat pompen. Gebruik de
+rustspanning, of compenseer met stroom × pakweerstand, en filter traag. Tot dat
+plafond er is, geldt de bedrijfsregel hieronder. De accuspanning staat al als
+`accu_v` in `/api/motors` en als `Accu_V` in de ritlog. Omdat `P = F · v` houdt dezelfde rem bij de halve
 snelheid de dubbele helling: **volle accu betekent weinig ruimte betekent
 langzaam naar beneden.** Dat is de enige mitigatie die de natuurkunde aan jouw
 kant zet.

@@ -1,5 +1,10 @@
 <script>
     import { onMount } from 'svelte';
+    import { motors, grensOmhoog, grensOmlaag } from '../lib/telemetry.js';
+
+    // Snelheidsbereik van de aandrijving (min/max eRPM in de VESC-config).
+    $: minKmh = grensOmhoog($motors.data?.limits?.min_kmh ?? 0.5);
+    $: maxKmh = grensOmlaag($motors.data?.limits?.max_kmh ?? 5.0);
 
     let status = "Gestopt";
     let waypoints = [];
@@ -172,7 +177,7 @@
     <div class="sliders-box">
         <h3>Tuning Parameters</h3>
         <label>Snelheid ({targetSpeed} km/h)
-            <input type="range" min="0.5" max="5.0" step="0.1" bind:value={targetSpeed} on:change={updateSliders}>
+            <input type="range" min={minKmh} max={maxKmh} step="0.1" bind:value={targetSpeed} on:change={updateSliders}>
         </label>
         
         <label>Lookahead Afstand ({lookaheadDistance} m) <i>(Alleen Pure Pursuit)</i>

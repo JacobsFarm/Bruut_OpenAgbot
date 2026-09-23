@@ -234,7 +234,7 @@ class ABNavigator:
         # gebeurt zodra de missie zichzelf beeindigt na de laatste baan, en
         # join() op je eigen thread gooit een RuntimeError. Die vloog er dan
         # tussenuit voordat vehicle.stop() werd bereikt - en dan bleef het
-        # voertuig op zijn laatste DAC-waarde doorrijden. is_active staat hier
+        # voertuig op zijn laatste snelheid doorrijden. is_active staat hier
         # al op False, dus de lus stopt hoe dan ook vanzelf.
         if (self.nav_thread and self.nav_thread.is_alive()
                 and self.nav_thread is not threading.current_thread()):
@@ -249,11 +249,33 @@ class ABNavigator:
     #  Hoofdlus
     # ------------------------------------------------------------------ #
     def _navigation_loop(self):
+        try:
+            self._run_loop()
+        except Exception as e:
+            # Zelfde vangnet als in navigator.py: een stil stervende thread zou
+            # het voertuig op zijn laatste commando laten doorrijden.
+            self.logger.exception(f"Onverwachte fout in de AB-navigatie: {e}")
+            self.stop()
+            self.status_message = f"Navigatiefout: {e}"
+        finally:
+            self.vehicle.stop()
+
+    def _run_loop(self):
         rate_hz = 10.0
         interval = 1.0 / rate_hz
 
         while self.is_active:
             start_time = time.time()
+
+            # Aandrijving in orde? CAN weg, een VESC-fout of een vastgelopen
+            # wiel beeindigt de missie; opnieuw rijden gaat via een nieuwe start.
+            fout = self.vehicle.drive_fault
+            if fout:
+                self.logger.error(f"AB-missie gestopt, aandrijving: {fout}")
+                self.stop()
+                self.status_message = f"Gestopt - aandrijving: {fout}"
+                break
+
             curr_pos = self.gps.get_current_position()
 
             # Veiligheid: geen (RTK-)fix -> stilstaan
@@ -293,7 +315,7 @@ class ABNavigator:
             elapsed = time.time() - start_time
             time.sleep(max(0.01, interval - elapsed))
 
-        self.vehicle.stop()
+        # Stilzetten gebeurt in _navigation_loop(), ook na een fout.
 
     # ------------------------------------------------------------------ #
     #  TRACKING: volg de huidige baanlijn met pure pursuit
@@ -341,9 +363,8 @@ class ABNavigator:
                 heading_echt=curr_pos["heading"], heading_doel=target_bearing,
                 heading_fout=xte, stuurhoek=steering, doel_kmh=self.target_speed_kmh,
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
-                dac_links=self.vehicle.current_dac_links,
-                dac_rechts=self.vehicle.current_dac_rechts,
-                dist_wp=rest, lookahead=self.lookahead_m, dt=0.1
+                dist_wp=rest, lookahead=self.lookahead_m, dt=0.1,
+                motor=self.vehicle.log_snapshot()
             )
 
     # ------------------------------------------------------------------ #
@@ -410,9 +431,8 @@ class ABNavigator:
                 heading_echt=heading, heading_doel=target_bearing,
                 heading_fout=rest_hoek, stuurhoek=steering, doel_kmh=self.turn_speed_kmh,
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
-                dac_links=self.vehicle.current_dac_links,
-                dac_rechts=self.vehicle.current_dac_rechts,
-                dist_wp=beste_d, lookahead=self.turn_lookahead_m, dt=0.1
+                dist_wp=beste_d, lookahead=self.turn_lookahead_m, dt=0.1,
+                motor=self.vehicle.log_snapshot()
             )
 
     def _plan_turn(self, along):

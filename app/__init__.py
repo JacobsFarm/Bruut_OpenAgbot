@@ -1,5 +1,6 @@
 import os
 import json
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,8 +28,18 @@ ab_navigator = ABNavigator(gps_system, vehicle_controller, config)
 
 from app.api.endpoints import router as api_router
 
+@asynccontextmanager
+async def lifespan(app):
+    yield
+    # Bij afsluiten (Ctrl+C) de navigatie stoppen en de wielen zelf stilzetten,
+    # in plaats van te wachten tot de VESC-timeout ze uitzet.
+    for nav in (navigator, ab_navigator):
+        if nav.is_active:
+            nav.stop()
+    vehicle_controller.shutdown()
+
 def create_app():
-    app = FastAPI(title="Bruut OpenAgbot")
+    app = FastAPI(title="Bruut OpenAgbot", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

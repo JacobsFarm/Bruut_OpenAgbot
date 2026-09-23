@@ -25,8 +25,10 @@ FILE_NAME = "rit_Waypoint_Route_20260614_210608.csv"
 # Kolommen zoals de logger (app/services/logger.py) ze wegschrijft:
 #   Tijdstip, Modus, WP_Doel, Lat, Lon, Fix, HDOP,
 #   Heading_Echt, Heading_Doel, Heading_Fout,
-#   Stuurhoek, Doel_kmh, Echt_kmh, DAC_Links, DAC_Rechts,
-#   Afstand_tot_WP_m, Lookahead_m, Loop_Tijd_s
+#   Stuurhoek, Doel_kmh, Echt_kmh,
+#   Afstand_tot_WP_m, Lookahead_m, Loop_Tijd_s,
+#   plus de aandrijfkolommen uit app/hardware/motor_logic.py (LOG_COLUMNS).
+#   Ritten van voor de VESC's hebben DAC_Links en DAC_Rechts in plaats daarvan.
 #
 # Let op, de betekenis van twee kolommen hangt af van de modus:
 #
@@ -82,6 +84,14 @@ def percentile(values, p):
 
 def avg(values, default=0.0):
     return (sum(values) / len(values)) if values else default
+
+
+def optional_float(raw, key):
+    """Kolom als float, of None als hij in deze log ontbreekt of leeg is."""
+    try:
+        return float(raw[key])
+    except (KeyError, ValueError, TypeError):
+        return None
 
 
 def parse_time(value):
@@ -159,8 +169,26 @@ def read_rows(csv_path):
                     "stuur": float(raw["Stuurhoek"]),
                     "doel_kmh": float(raw["Doel_kmh"]),
                     "echt_kmh": float(raw["Echt_kmh"]),
-                    "dac_l": float(raw["DAC_Links"]),
-                    "dac_r": float(raw["DAC_Rechts"]),
+                    # Oude ritten: DAC-kolommen; nieuwe: VESC-kolommen.
+                    "dac_l": optional_float(raw, "DAC_Links"),
+                    "dac_r": optional_float(raw, "DAC_Rechts"),
+                    "erpm_l": optional_float(raw, "ERPM_Doel_L"),
+                    "erpm_r": optional_float(raw, "ERPM_Doel_R"),
+                    "stroom_l": optional_float(raw, "Motorstroom_L_A"),
+                    "stroom_r": optional_float(raw, "Motorstroom_R_A"),
+                    "wiel_kmh_l": optional_float(raw, "Wiel_kmh_L"),
+                    "wiel_kmh_r": optional_float(raw, "Wiel_kmh_R"),
+                    "fet_l": optional_float(raw, "Temp_FET_L_C"),
+                    "fet_r": optional_float(raw, "Temp_FET_R_C"),
+                    "model_l": optional_float(raw, "Motortemp_model_L_C"),
+                    "model_r": optional_float(raw, "Motortemp_model_R_C"),
+                    "odo_l": optional_float(raw, "Afstand_L_m"),
+                    "odo_r": optional_float(raw, "Afstand_R_m"),
+                    "accu_v": optional_float(raw, "Accu_V"),
+                    "accu_w": optional_float(raw, "Accu_W"),
+                    "accu_pct": optional_float(raw, "Accu_pct"),
+                    "verbruikt_wh": optional_float(raw, "Verbruikt_Wh"),
+                    "terug_wh": optional_float(raw, "Teruggeleverd_Wh"),
                     "afstand": float(raw["Afstand_tot_WP_m"]),
                     "lookahead": float(raw["Lookahead_m"]),
                     "loop_t": float(raw["Loop_Tijd_s"]),
@@ -521,15 +549,35 @@ def generate_report(csv_path, report_path, cfg):
             if groep:
                 n = sum(1 for v in groep if v >= steer_sat_threshold)
                 lines.append(f"  - {naam:<16s}: {100 * n / len(groep):.1f} % aan de limiet")
-    lines.append(f"- DAC-verschil gem. : {avg([abs(r['dac_l'] - r['dac_r']) for r in rows]):.1f}  "
-                 f"(stuurintensiteit)")
-    lines.append(f"- DAC-belasting gem.: {avg([(r['dac_l'] + r['dac_r']) / 2 for r in rows]):.1f}  "
-                 f"(motorbelasting)")
+    # Aandrijving: oude ritten hebben DAC-kolommen, nieuwe de VESC-kolommen.
+    vesc = [r for r in rows if None not in (r["erpm_l"], r["erpm_r"], r["stroom_l"], r["stroom_r"])]
+    dac = [r for r in rows if None not in (r["dac_l"], r["dac_r"])]
+    if vesc:
+        # Bij de VESC's ligt het toerental per wiel vast; belasting en
+        # scheeftrek lees je daarom af aan de motorstroom, niet aan het commando.
+        lines.append(f"- eRPM-verschil gem.: {avg([abs(r['erpm_l'] - r['erpm_r']) for r in vesc]):.0f}  "
+                     f"(differentieel)")
+        lines.append(f"- Motorstroom gem.  : links {avg([r['stroom_l'] for r in vesc]):.1f} A, "
+                     f"rechts {avg([r['stroom_r'] for r in vesc]):.1f} A")
+    elif dac:
+        lines.append(f"- DAC-verschil gem. : {avg([abs(r['dac_l'] - r['dac_r']) for r in dac]):.1f}  "
+                     f"(stuurintensiteit)")
+        lines.append(f"- DAC-belasting gem.: {avg([(r['dac_l'] + r['dac_r']) / 2 for r in dac]):.1f}  "
+                     f"(motorbelasting)")
 
     # Scheeftrek-test: rijdt hij met de wielen recht ook echt recht, of trekt
     # een van de twee hubmotoren? Alleen zinvol als hij ook echt rijdt.
-    recht = [r for r in rows if abs(r["stuur"]) < STRAIGHT_STEER_DEG and r["echt_kmh"] > 0.5]
-    if len(recht) >= 20:
+    def rechtuit(groep):
+        return [r for r in groep if abs(r["stuur"]) < STRAIGHT_STEER_DEG and r["echt_kmh"] > 0.5]
+
+    if len(rechtuit(vesc)) >= 20:
+        recht = rechtuit(vesc)
+        verschil = avg([r["stroom_l"] - r["stroom_r"] for r in recht])
+        oordeel = "symmetrisch" if abs(verschil) < 1.0 else "SCHEEF - een kant werkt harder"
+        lines.append(f"- Scheeftrek-test   : rechtuit (n={len(recht)}) motorstroom links-rechts "
+                     f"{verschil:+.1f} A -> {oordeel}")
+    elif len(rechtuit(dac)) >= 20:
+        recht = rechtuit(dac)
         verschil = avg([r["dac_l"] - r["dac_r"] for r in recht])
         oordeel = "symmetrisch" if abs(verschil) < 15 else "SCHEEF - een kant trekt harder"
         lines.append(f"- Scheeftrek-test   : rechtuit (n={len(recht)}) links-rechts "
@@ -538,6 +586,41 @@ def generate_report(csv_path, report_path, cfg):
         lines.append("- Scheeftrek-test   : te weinig rechtuit-samples "
                      f"(|stuurhoek| < {STRAIGHT_STEER_DEG}° en rijdend)")
     lines.append("")
+
+    # ---------- Accu & wielen (alleen ritten met de VESC-kolommen) ----------
+    accu = [r for r in rows if None not in (r["accu_v"], r["verbruikt_wh"], r["terug_wh"])]
+    if len(accu) >= 2:
+        eerste, laatste = accu[0], accu[-1]
+        verbruikt = laatste["verbruikt_wh"] - eerste["verbruikt_wh"]
+        terug = laatste["terug_wh"] - eerste["terug_wh"]
+        lines.append("[ACCU & WIELEN]")
+        lines.append(f"- Spanning          : {eerste['accu_v']:.1f} V -> {laatste['accu_v']:.1f} V "
+                     f"(laagste {min(r['accu_v'] for r in accu):.1f} V)")
+        if eerste["accu_pct"] is not None and laatste["accu_pct"] is not None:
+            lines.append(f"- Lading (schatting): {eerste['accu_pct']:.0f} % -> {laatste['accu_pct']:.0f} %")
+        lines.append(f"- Energie deze rit  : {verbruikt - terug:.1f} Wh netto "
+                     f"({verbruikt:.1f} Wh verbruikt, {terug:.1f} Wh teruggeleverd)")
+        vermogen = [r["accu_w"] for r in accu if r["accu_w"] is not None]
+        if vermogen:
+            lines.append(f"- Vermogen          : gem. {avg(vermogen):.0f} W, piek {max(vermogen):.0f} W")
+        odo = [r for r in accu if r["odo_l"] is not None and r["odo_r"] is not None]
+        if len(odo) >= 2:
+            meters = ((odo[-1]["odo_l"] - odo[0]["odo_l"]) + (odo[-1]["odo_r"] - odo[0]["odo_r"])) / 2
+            per_km = f", {(verbruikt - terug) / (meters / 1000):.0f} Wh/km" if meters > 10 else ""
+            lines.append(f"- Afgelegd (wielen) : {meters:.0f} m{per_km}")
+        # Wielsnelheid tegen GPS: een blijvend verschil is slip of een verkeerde wielomtrek.
+        rijdend = [r for r in accu if None not in (r["wiel_kmh_l"], r["wiel_kmh_r"]) and r["echt_kmh"] > 0.5]
+        if len(rijdend) >= 20:
+            wiel = avg([(abs(r["wiel_kmh_l"]) + abs(r["wiel_kmh_r"])) / 2 for r in rijdend])
+            gps = avg([r["echt_kmh"] for r in rijdend])
+            lines.append(f"- Wielen vs GPS     : {wiel:.2f} vs {gps:.2f} km/h "
+                         f"({100 * (wiel - gps) / wiel:+.1f} %: slip of wielomtrek)")
+        temps = [r for r in accu if None not in (r["fet_l"], r["fet_r"], r["model_l"], r["model_r"])]
+        if temps:
+            lines.append(f"- Temperatuur max.  : FET {max(r['fet_l'] for r in temps):.0f} / "
+                         f"{max(r['fet_r'] for r in temps):.0f} °C, motor (model) "
+                         f"{max(r['model_l'] for r in temps):.0f} / {max(r['model_r'] for r in temps):.0f} °C")
+        lines.append("")
 
     # ---------- GPS & systeem ----------
     loop_tijden = [r["loop_t"] for r in rows]

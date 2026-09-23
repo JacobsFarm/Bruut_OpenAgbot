@@ -85,7 +85,7 @@ Overige velden (current scales, input current map, DRV8301) laten staan.
 |---|---|---|---|
 | Battery Voltage Cutoff Start | 10 V | **42,0 V** | Motorspec zegt 41 ±1 V, én het is 3,00 V/cel op 14S. Twee redeneringen, één antwoord |
 | Battery Voltage Cutoff End | 8 V | **40,0 V** | Dit is de **enige** onderspanningsbeveiliging die er is — zie *De accu* |
-| Battery Voltage Regen Cutoff Start | 1000 V | **56,0 V** | Achtervang boven de softwaretaper (55,0–57,0 V in `config.json`) |
+| Battery Voltage Regen Cutoff Start | 1000 V | **56,0 V** | Vanaf hier bouwt de VESC de teruglevering zelf af. Het bijpassende snelheidsplafond in de software is nog niet gebouwd — zie README_DEV |
 | Battery Voltage Regen Cutoff End | 1100 V | **57,5 V** | = gemiddeld 4,11 V/cel. Bewust laag: er is geen celbewaking die ingrijpt |
 | Battery Filter Constant | 45 | *laten* | Niet scherper zetten: onder belasting zakt de spanning kort in, en zonder filter gaat je cutoff af op elke stroompiek |
 
@@ -173,8 +173,8 @@ onder ~1,4 km/h niet.
 
 **De timeout is je beste beveiliging omdat hij niet van onze software afhangt.**
 Stopt de Jetson met sturen, dan zetten beide VESC's zichzelf na 500 ms uit — ook
-als deze codebase niet meer draait. Daarom zendt `motor_logic.py` onafgebroken op
-50 Hz, ook als er niets verandert.
+als deze codebase niet meer draait. Daarom zendt de regellus in
+`vehicle_controller.py` onafgebroken op 50 Hz, ook als er niets verandert.
 
 **Toon dat één keer aan:** laat een wiel draaien en trek de CAN-kabel eruit. Hij
 hoort binnen een halve seconde uit te vallen.

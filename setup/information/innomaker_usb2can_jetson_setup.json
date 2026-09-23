@@ -1,0 +1,59 @@
+{
+  "project": "InnoMaker USB-to-CAN Setup on NVIDIA Jetson Orin Nano",
+  "system": {
+    "os": "Ubuntu 22.04 (JetPack 6)",
+    "kernel": "5.15.148-tegra",
+    "driver": "gs_usb",
+    "interface": "can1"
+  },
+  "setup_steps": [
+    {
+      "step": 1,
+      "title": "Install dependencies and kernel headers",
+      "description": "Install essential build utilities, DKMS, and NVIDIA Tegra kernel headers required to compile external modules.",
+      "command": "sudo apt update && sudo apt install -y git build-essential dkms nvidia-l4t-kernel-headers can-utils"
+    },
+    {
+      "step": 2,
+      "title": "Clone the gs_usb source repository",
+      "description": "Download the standalone gs_usb driver adapted for Linux 5.15 directly into the DKMS source path.",
+      "command": "sudo git clone https://github.com/mines-nancy/gs_usb-dkms.git /usr/src/gs_usb-5.15"
+    },
+    {
+      "step": 3,
+      "title": "Register, compile, and install via DKMS",
+      "description": "Register the module with DKMS and build it against the running Tegra kernel.",
+      "command": "sudo dkms add -m gs_usb -v 5.15 && sudo dkms build -m gs_usb -v 5.15 && sudo dkms install -m gs_usb -v 5.15"
+    },
+    {
+      "step": 4,
+      "title": "Load the gs_usb kernel module",
+      "description": "Load the compiled driver module into the active Linux kernel.",
+      "command": "sudo modprobe gs_usb"
+    },
+    {
+      "step": 5,
+      "title": "Bring up the CAN interface",
+      "description": "Configure bitrate to 500 kbps, disable loopback for real hardware comms, and set the link to UP.",
+      "command": "sudo ip link set can1 down && sudo ip link set can1 type can bitrate 500000 loopback off && sudo ip link set can1 up"
+    },
+    {
+      "step": 6,
+      "title": "Verify interface state",
+      "description": "Confirm that can1 is online and functioning properly without bus errors.",
+      "command": "ip link show can1"
+    },
+    {
+      "step": 7,
+      "title": "Monitor live CAN traffic",
+      "description": "Listen for incoming CAN frames sent by connected nodes such as VESC motor controllers.",
+      "command": "candump can1"
+    }
+  ],
+  "quick_reference_notes": {
+    "interface_naming": "can0 belongs to the internal Orin Nano controller (mttcan). The InnoMaker USB adapter is assigned to can1.",
+    "jetpack6_context": "gs_usb is omitted from the default JetPack 6 defconfig. DKMS ensures the driver automatically rebuilds if the kernel updates.",
+    "vesc_addressing": "VESC uses 29-bit extended CAN IDs. The target controller ID (e.g., 1 or 2) occupies the lowest 8 bits.",
+    "hardware_termination": "Ensure the 120-ohm termination switch on the InnoMaker adapter is set to ON and common GND is connected to all controllers."
+  }
+}
