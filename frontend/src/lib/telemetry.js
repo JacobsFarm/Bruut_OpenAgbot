@@ -57,3 +57,12 @@ export function fmt(waarde, decimalen = 1) {
     if (waarde === null || waarde === undefined || Number.isNaN(Number(waarde))) return '–';
     return Number(waarde).toFixed(decimalen);
 }
+
+// GGA-fixkwaliteit als tekst plus kleur (groen/oranje/rood), voor het
+// dashboard en de robot op de kaart.
+export function fixInfo(fix) {
+    if (fix === 4) return { tekst: 'RTK Fixed', kleur: 'groen' };
+    if (fix === 5) return { tekst: 'RTK Float', kleur: 'oranje' };
+    if (fix === 1 || fix === 2) return { tekst: 'Standaard GPS', kleur: 'oranje' };
+    return { tekst: 'Geen fix', kleur: 'rood' };
+}

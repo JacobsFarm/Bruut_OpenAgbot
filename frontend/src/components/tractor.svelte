@@ -1,6 +1,7 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
     import { motors, fmt, grensOmhoog, grensOmlaag } from '../lib/telemetry.js';
+    import Veldkaart from './veldkaart.svelte';
 
     // Snelheidsbereik van de aandrijving (min/max eRPM in de VESC-config).
     // Daarbuiten rijdt hij toch op de grens, dus de schuiven lopen niet verder.
@@ -41,6 +42,16 @@
     let liveBericht = "";
     let timer = null;
 
+    // Voorbeeld op de kaart: wat hij met deze instellingen gaat rijden. Alleen
+    // zolang je een missie voorbereidt; na de start toont de kaart het plan van
+    // de robot, en na afloop blijft dat staan tot je weer iets verzet.
+    let voorbeeld = null;
+    let voorbeeldJson = null;
+    let voorbeeldNodig = false;
+    let voorbeeldFout = "";
+    let voorbeeldTimer = null;
+    let statusTeller = 0;
+
     onMount(async () => {
         await haalLijnenOp();
         timer = setInterval(haalStatusOp, 1000);
@@ -48,6 +59,7 @@
 
     onDestroy(() => {
         if (timer) clearInterval(timer);
+        clearTimeout(voorbeeldTimer);
     });
 
     async function haalStatusOp() {
@@ -58,7 +70,75 @@
             liveBericht = s.ab_active
                 ? `${s.ab_state} | ${s.ab_message} | baan ${s.ab_baan_nr}/${s.ab_totaal_banen}`
                 : "";
+            // Draait de robot intussen, of komt de GPS-fix binnen, dan kan de
+            // rijrichting van de eerste baan omslaan: voorbeeld af en toe verversen.
+            if (voorbeeldNodig && !s.ab_active && ++statusTeller % 3 === 0) haalVoorbeeldOp();
         } catch(e) {}
+    }
+
+    // Hetzelfde bericht voor de start en voor het voorbeeld op de kaart, zodat
+    // de kaart precies laat zien wat er na 'Start' gereden wordt.
+    function missieBericht() {
+        return {
+            work_width_m: werkbreedte,
+            field_length_m: veldlengte,
+            speed_kmh: snelheid,
+            lat_a: lat_a, lon_a: lon_a,
+            lat_b: lat_b, lon_b: lon_b,
+            lookahead_m: parseFloat(lookahead),
+            turn_speed_kmh: parseFloat(bochtSnelheid),
+            swath_order: baanVolgorde.length ? baanVolgorde : null,
+            aantal_banen: parseInt(aantalBanen),
+            banen_overslaan: parseInt(banenOverslaan),
+            kopakker_extra_m: parseFloat(kopakkerExtra),
+            kant: kant
+        };
+    }
+
+    function vernieuwVoorbeeld() {
+        voorbeeldNodig = true;
+        clearTimeout(voorbeeldTimer);
+        voorbeeldTimer = setTimeout(haalVoorbeeldOp, 250);
+    }
+
+    async function haalVoorbeeldOp() {
+        if (!voorbeeldNodig || missieActief || !lat_a || !lat_b || ontbrekend().length) return;
+        try {
+            const res = await fetch('/api/ab/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(missieBericht())
+            });
+            const data = await res.json();
+            if (!voorbeeldNodig) return;     // intussen gestart
+            if (res.ok && data.status === 'ok') {
+                // Alleen vervangen als er echt iets anders is, anders tekent
+                // de kaart elke paar seconden hetzelfde opnieuw.
+                const json = JSON.stringify(data.plan);
+                if (json !== voorbeeldJson) {
+                    voorbeeldJson = json;
+                    voorbeeld = data.plan;
+                }
+                voorbeeldFout = "";
+            } else {
+                voorbeeld = null;
+                voorbeeldJson = null;
+                voorbeeldFout = data.msg || `geen voorbeeld mogelijk (HTTP ${res.status})`;
+            }
+        } catch(e) {}
+    }
+
+    function wisVoorbeeld() {
+        voorbeeldNodig = false;
+        clearTimeout(voorbeeldTimer);
+        voorbeeld = null;
+        voorbeeldJson = null;
+        voorbeeldFout = "";
+    }
+
+    function gewijzigd() {
+        aangepast = true;
+        vernieuwVoorbeeld();
     }
 
     // Zelfde algoritme als maak_baan_volgorde() in ab_navigator.py, zodat je
@@ -84,7 +164,7 @@
         aantalBanen = Math.min(500, Math.max(1, parseInt(aantalBanen) || 1));
         banenOverslaan = Math.min(9, Math.max(0, parseInt(banenOverslaan) || 0));
         baanVolgorde = berekenVolgorde(aantalBanen, banenOverslaan);
-        aangepast = true;
+        gewijzigd();
     }
 
     // Een leeggemaakt invulvakje geeft null, en isNaN(null) is false - vandaar
@@ -127,6 +207,7 @@
     function herstelUitJson() {
         if (!gekozenLijn) return;
         pasPlanToe(gekozenLijn);
+        vernieuwVoorbeeld();
         statusBericht = `Waarden van '${gekozenLijn.veldnaam}' teruggezet uit de json`;
     }
 
@@ -150,6 +231,7 @@
             lat_b = lijn.lat_b;
             lon_b = lijn.lon_b;
             pasPlanToe(lijn);
+            vernieuwVoorbeeld();
             statusBericht = baanVolgorde.length
                 ? `'${lijn.veldnaam}': ${baanVolgorde.length} banen x ${werkbreedte} m, ${veldlengte.toFixed(0)} m lang`
                 : `Lijn '${lijn.veldnaam}' geladen (geen missieplan in de json)`;
@@ -159,6 +241,7 @@
             lat_b = null;
             baanVolgorde = [];
             aangepast = false;
+            wisVoorbeeld();
             statusBericht = "Kies een A-B lijn";
         }
     }
@@ -178,25 +261,15 @@
             const res = await fetch('/api/nav/start_ab', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    work_width_m: werkbreedte,
-                    field_length_m: veldlengte,
-                    speed_kmh: snelheid,
-                    lat_a: lat_a, lon_a: lon_a,
-                    lat_b: lat_b, lon_b: lon_b,
-                    lookahead_m: parseFloat(lookahead),
-                    turn_speed_kmh: parseFloat(bochtSnelheid),
-                    swath_order: baanVolgorde.length ? baanVolgorde : null,
-                    aantal_banen: parseInt(aantalBanen),
-                    banen_overslaan: parseInt(banenOverslaan),
-                    kopakker_extra_m: parseFloat(kopakkerExtra),
-                    kant: kant
-                })
+                body: JSON.stringify(missieBericht())
             });
             const data = await res.json();
-            if (data.status === "error") {
-                statusBericht = "Fout: " + data.msg;
+            // Ook een geweigerd verzoek (422) is geen start: dan heeft de
+            // robot niets gedaan, al staat er geen status "error" in.
+            if (!res.ok || data.status === "error") {
+                statusBericht = "Fout: " + (data.msg || `de robot weigerde de opdracht (HTTP ${res.status})`);
             } else {
+                wisVoorbeeld();     // vanaf nu toont de kaart het plan van de robot
                 baanVolgorde = data.baan_volgorde || baanVolgorde;
                 statusBericht = `A-B Missie actief: ${baanVolgorde.length} banen`;
             }
@@ -233,6 +306,15 @@
     <div class="status-box">{statusBericht}</div>
     {#if missieActief}
         <div class="live-box">{liveBericht}</div>
+    {/if}
+
+    <Veldkaart {voorbeeld} />
+    {#if voorbeeldFout}
+        <p class="hint">Kaart: {voorbeeldFout}</p>
+    {/if}
+    {#if missieActief}
+        <!-- Tijdens de missie kijk je naar de kaart: de noodstop hoort daar direct onder. -->
+        <button class="btn-stop btn-stop-kaart" on:click={noodstop}>STOP ALLES</button>
     {/if}
 
     <div class="grid-layout">
@@ -279,9 +361,9 @@
                 <label for="werkbreedte">Werkbreedte (m)</label>
                 <div class="regel">
                     <input id="werkbreedte" type="range" min="1.0" max="10.0" step="0.1"
-                           bind:value={werkbreedte} on:change={() => aangepast = true}>
+                           bind:value={werkbreedte} on:change={gewijzigd}>
                     <input class="getal" type="number" min="0.1" step="0.1"
-                           bind:value={werkbreedte} on:change={() => aangepast = true}>
+                           bind:value={werkbreedte} on:change={gewijzigd}>
                 </div>
             </div>
 
@@ -289,9 +371,9 @@
                 <label for="veldlengte">Baanlengte / veldlengte (m)</label>
                 <div class="regel">
                     <input id="veldlengte" type="range" min="10" max="400" step="1"
-                           bind:value={veldlengte} on:change={() => aangepast = true}>
+                           bind:value={veldlengte} on:change={gewijzigd}>
                     <input class="getal" type="number" min="1" step="0.1"
-                           bind:value={veldlengte} on:change={() => aangepast = true}>
+                           bind:value={veldlengte} on:change={gewijzigd}>
                 </div>
             </div>
 
@@ -321,15 +403,15 @@
                 <label for="kopakker">Kopakker doorrijden (m)</label>
                 <div class="regel">
                     <input id="kopakker" type="range" min="0.0" max="15.0" step="0.5"
-                           bind:value={kopakkerExtra} on:change={() => aangepast = true}>
+                           bind:value={kopakkerExtra} on:change={gewijzigd}>
                     <input class="getal" type="number" min="0" step="0.5"
-                           bind:value={kopakkerExtra} on:change={() => aangepast = true}>
+                           bind:value={kopakkerExtra} on:change={gewijzigd}>
                 </div>
             </div>
 
             <div class="slider-group">
                 <label for="kant">Veld ligt ... van de A-B lijn</label>
-                <select id="kant" bind:value={kant} on:change={() => aangepast = true}>
+                <select id="kant" bind:value={kant} on:change={gewijzigd}>
                     <option value="rechts">rechts van de lijn</option>
                     <option value="links">links van de lijn</option>
                 </select>
@@ -407,4 +489,5 @@
     .btn-start, .btn-stop { padding: 20px; font-size: 20px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
     .btn-start { background: #4caf50; }
     .btn-stop { background: #d32f2f; }
+    .btn-stop-kaart { width: 100%; margin: -8px 0 20px; }
 </style>

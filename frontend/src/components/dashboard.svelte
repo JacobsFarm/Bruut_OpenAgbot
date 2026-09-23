@@ -1,5 +1,5 @@
 <script>
-    import { status, motors, fmt } from '../lib/telemetry.js';
+    import { status, motors, fmt, fixInfo } from '../lib/telemetry.js';
 
     $: gps = $status.data;
     $: m = $motors.data;
@@ -18,12 +18,6 @@
         ? 100 * (wielKmh - gpsKmh) / wielKmh
         : null;
 
-    function fixInfo(fix) {
-        if (fix === 4) return { tekst: 'RTK Fixed', kleur: 'groen' };
-        if (fix === 5) return { tekst: 'RTK Float', kleur: 'oranje' };
-        if (fix === 1 || fix === 2) return { tekst: 'Standaard GPS', kleur: 'oranje' };
-        return { tekst: 'Geen fix', kleur: 'rood' };
-    }
     $: fix = fixInfo(gps?.fix);
 
     function ladingKleur(pct) {

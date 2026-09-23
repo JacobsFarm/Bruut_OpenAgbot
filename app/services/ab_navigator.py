@@ -132,6 +132,17 @@ class ABNavigator:
         self.turn_target_bearing = 0.0   # koers van de volgende baan
         self.turn_start_time = 0.0
 
+        # Kaart in de webinterface. Het gereden spoor van deze missie, en een
+        # versienummer dat ophoogt zodra het geplande rijpad verandert: dan
+        # haalt de kaart het plan alleen opnieuw op als het echt anders is.
+        self.spoor = []                  # [[lat, lon, 0 = baan / 1 = bocht], ...]
+        self.spoor_stap_m = 0.25         # nieuw spoorpunt na zoveel meter
+        self.spoor_max_punten = 100000   # ruim 25 km; daarna stopt het bijhouden
+        self.plan_versie = 0
+        self.missie_nr = 0               # telt per start, zodat de kaart een nieuw spoor herkent
+        self.voltooid = False            # alle banen gereden
+        self.punt_b = None               # B zoals ingemeten, alleen voor de kaart
+
     # ------------------------------------------------------------------ #
     #  Publieke API (gebruikt door endpoints.py)
     # ------------------------------------------------------------------ #
@@ -144,6 +155,7 @@ class ABNavigator:
 
         # Verschillen A en B genoeg om er een richting uit te halen?
         ab_dist = self._haversine(lat_a, lon_a, lat_b, lon_b)
+        self.punt_b = (lat_b, lon_b) if ab_dist > 1.0 else None
         if ab_dist > 1.0:
             self.base_bearing_deg = self._bearing(lat_a, lon_a, lat_b, lon_b)
             self.line_initialized = True
@@ -175,24 +187,14 @@ class ABNavigator:
         vraagt bij elke kopakker een omega-bocht omdat de banen dan tegen
         elkaar aan liggen.
         """
-        self.work_width_m = max(0.1, work_width)
-        # Zonder bruikbare baanlengte pakken we de gemeten afstand A->B: B is
-        # tenslotte de overkant van het veld, dus die lengte staat er al in.
         if (not field_length or field_length < 1.0) and self.ab_length_m > 1.0:
-            field_length = self.ab_length_m
-            self.logger.info(f"Baanlengte niet opgegeven -> {field_length:.1f} m uit A->B.")
-        self.field_length_m = max(1.0, field_length)
+            self.logger.info(f"Baanlengte niet opgegeven -> {self.ab_length_m:.1f} m uit A->B.")
+        (self.work_width_m, self.field_length_m, self.swath_order,
+         self.kant_sign, self.headland_overrun_m) = self._missie_instellingen(
+            work_width, field_length, swath_order, aantal_banen, banen_overslaan,
+            kopakker_extra_m, kant, self.ab_length_m
+        )
         self.target_speed_kmh = speed
-        self.kant_sign = -1.0 if str(kant).lower().startswith("l") else 1.0
-        if kopakker_extra_m is not None:
-            self.headland_overrun_m = max(0.0, kopakker_extra_m)
-
-        if swath_order:
-            self.swath_order = [int(i) for i in swath_order]
-        elif aantal_banen:
-            self.swath_order = maak_baan_volgorde(int(aantal_banen), banen_overslaan)
-        else:
-            self.swath_order = list(range(self.max_swaths))
 
         if self.is_active:
             self.stop()
@@ -203,6 +205,10 @@ class ABNavigator:
         self.pass_sign = 1.0
         self.state = "TRACKING"
         self.status_message = "Missie gestart"
+        self.voltooid = False
+        self.spoor = []
+        self.missie_nr += 1
+        self.plan_versie += 1
 
         if self.drive_logger:
             self.drive_logger.start_nieuwe_rit(navigatie_modus="AB_Missie")
@@ -244,6 +250,160 @@ class ABNavigator:
             self.drive_logger.stop_log()
         self.status_message = "Gestopt"
         self.logger.info("AB-missie gestopt.")
+
+    def _missie_instellingen(self, work_width, field_length, swath_order, aantal_banen,
+                             banen_overslaan, kopakker_extra_m, kant, ab_length_m):
+        """
+        Zet de missie-invoer om naar de waarden waarmee gereden wordt:
+        (werkbreedte, baanlengte, werkvolgorde, kant_sign, kopakker). Gedeeld
+        door start_mission() en preview(), zodat de kaart vooraf precies het
+        plan laat zien dat de robot na de start ook rijdt.
+        """
+        breedte = max(0.1, work_width)
+        # Zonder bruikbare baanlengte pakken we de gemeten afstand A->B: B is
+        # tenslotte de overkant van het veld, dus die lengte staat er al in.
+        if (not field_length or field_length < 1.0) and ab_length_m > 1.0:
+            field_length = ab_length_m
+        lengte = max(1.0, field_length or 0.0)
+        kant_sign = -1.0 if str(kant).lower().startswith("l") else 1.0
+        kopakker = (self.headland_overrun_m if kopakker_extra_m is None
+                    else max(0.0, kopakker_extra_m))
+
+        if swath_order:
+            volgorde = [int(i) for i in swath_order]
+        elif aantal_banen:
+            volgorde = maak_baan_volgorde(int(aantal_banen), banen_overslaan)
+        else:
+            volgorde = list(range(self.max_swaths))
+        return breedte, lengte, volgorde, kant_sign, kopakker
+
+    # ------------------------------------------------------------------ #
+    #  Kaart (webinterface): het rijpad in GPS-coordinaten en het spoor
+    # ------------------------------------------------------------------ #
+    def plan(self):
+        """
+        Het rijpad van de lopende of laatst gestarte missie, of None zolang er
+        geen lijn is (nog nooit gestart, of A == B en nog geen GPS-fix gehad).
+        """
+        versie = self.plan_versie        # eerst lezen: verandert hij tijdens het rekenen, dan haalt de kaart hem opnieuw
+        if not self.line_initialized or not self.swath_order:
+            return None
+        plan = self._bouw_plan(
+            self.ref_lat, self.ref_lon, self.base_bearing_deg, self.field_length_m,
+            self.work_width_m, self.swath_order, self.kant_sign, self.headland_overrun_m,
+            self.first_sign or 1.0, self.punt_b
+        )
+        plan["richting_bekend"] = self.first_sign is not None
+        plan["versie"] = versie
+        return plan
+
+    def preview(self, lat_a, lon_a, lat_b, lon_b, work_width, field_length,
+                swath_order=None, aantal_banen=None, banen_overslaan=1,
+                kopakker_extra_m=None, kant="rechts"):
+        """
+        Het plan voor instellingen die nog niet gestart zijn. Een lopende missie
+        merkt er niets van. Maakt dezelfde keuzes als de robot bij de start: de
+        lijn uit A->B (of uit de huidige positie en neus als A en B samenvallen)
+        en de rijrichting van de eerste baan uit de neus-richting. Geeft None
+        als er zonder GPS-fix geen lijn te maken is.
+        """
+        pos = self.gps.get_current_position()
+        gps_ok = bool(pos) and pos.get("lat", 0.0) != 0.0 and pos.get("fix", 0) >= 2
+
+        ab_dist = self._haversine(lat_a, lon_a, lat_b, lon_b)
+        if ab_dist > 1.0:
+            ref_lat, ref_lon = lat_a, lon_a
+            koers = self._bearing(lat_a, lon_a, lat_b, lon_b)
+            punt_b = (lat_b, lon_b)
+        elif gps_ok:
+            ref_lat, ref_lon, koers = pos["lat"], pos["lon"], pos["heading"]
+            ab_dist, punt_b = 0.0, None
+        else:
+            return None
+
+        breedte, lengte, volgorde, kant_sign, kopakker = self._missie_instellingen(
+            work_width, field_length, swath_order, aantal_banen, banen_overslaan,
+            kopakker_extra_m, kant, ab_dist
+        )
+        eerste = self._eerste_richting(pos["heading"], koers) if gps_ok else None
+        plan = self._bouw_plan(ref_lat, ref_lon, koers, lengte, breedte, volgorde,
+                               kant_sign, kopakker, eerste or 1.0, punt_b)
+        plan["richting_bekend"] = eerste is not None
+        return plan
+
+    def spoor_vanaf(self, vanaf, max_punten=5000):
+        """
+        Het gereden spoor vanaf punt 'vanaf': de kaart vraagt alleen op wat hij
+        nog niet heeft. Vraagt hij verder dan er is (er is intussen een nieuwe
+        missie met een kort spoor), dan krijgt hij alles vanaf het begin.
+        """
+        spoor = self.spoor               # vaste verwijzing: start_mission() zet een nieuwe lijst neer
+        if vanaf < 0 or vanaf > len(spoor):
+            vanaf = 0
+        return vanaf, spoor[vanaf:vanaf + max_punten]
+
+    def _bouw_plan(self, ref_lat, ref_lon, koers, lengte, breedte, volgorde,
+                   kant_sign, kopakker, eerste_sign, punt_b=None):
+        """
+        Het complete rijpad in GPS-coordinaten. Elke baan loopt van kopakker tot
+        kopakker (net als _uitrij_along), en de bochten ertussen komen uit
+        _bouw_bochtpad(): dezelfde functie die de robot tijdens het rijden
+        gebruikt. In het echt begint een bocht een paar centimeter later, op
+        het punt waar de robot het einde van de baan passeert.
+        """
+        def gps(along, cross):
+            return self._frame_naar_latlon(along, cross, ref_lat, ref_lon, koers)
+
+        banen, bochten = [], []
+        sign = eerste_sign
+        for pos, baan in enumerate(volgorde):
+            cross = kant_sign * baan * breedte
+            ingang = -kopakker if sign > 0 else lengte + kopakker
+            uitgang = lengte + kopakker if sign > 0 else -kopakker
+            banen.append({
+                "baan": baan,
+                "pad": [gps(ingang, cross), gps(uitgang, cross)],
+                "koers": round((koers if sign > 0 else koers + 180.0) % 360.0, 1),
+            })
+            if pos + 1 < len(volgorde):
+                volgende = volgorde[pos + 1]
+                pad, _, _, soort = self._bouw_bochtpad(
+                    uitgang, cross, kant_sign * volgende * breedte, sign
+                )
+                bochten.append({
+                    "van": baan, "naar": volgende, "soort": soort,
+                    "pad": [gps(a, c) for a, c in pad],
+                })
+                sign = -sign
+
+        # Het gewas: van along 0 tot de baanlengte, over alle banen plus een
+        # halve werkbreedte aan weerskanten.
+        kruis = [kant_sign * b * breedte for b in set(volgorde)]
+        links, rechts = min(kruis) - breedte / 2.0, max(kruis) + breedte / 2.0
+        return {
+            "koers": round(koers, 2),
+            "baanlengte_m": round(lengte, 2),
+            "werkbreedte_m": breedte,
+            "kopakker_m": kopakker,
+            "eerste_richting": "A->B" if eerste_sign > 0 else "B->A",
+            "a": gps(0.0, 0.0),
+            "b": [round(punt_b[0], 7), round(punt_b[1], 7)] if punt_b else None,
+            "veld": [gps(0.0, links), gps(lengte, links), gps(lengte, rechts), gps(0.0, rechts)],
+            "banen": banen,
+            "bochten": bochten,
+        }
+
+    def _leg_spoor_vast(self, pos):
+        """Het gereden spoor voor de kaart: een punt per spoor_stap_m, en altijd bij een wissel tussen baan en bocht."""
+        if len(self.spoor) >= self.spoor_max_punten:
+            return
+        punt = [round(pos["lat"], 7), round(pos["lon"], 7), 1 if self.state == "TURNING" else 0]
+        if self.spoor:
+            vorig = self.spoor[-1]
+            if (vorig[2] == punt[2]
+                    and self._haversine(vorig[0], vorig[1], punt[0], punt[1]) < self.spoor_stap_m):
+                return
+        self.spoor.append(punt)
 
     # ------------------------------------------------------------------ #
     #  Hoofdlus
@@ -291,6 +451,7 @@ class ABNavigator:
                 self.ref_lon = curr_pos["lon"]
                 self.base_bearing_deg = curr_pos["heading"]
                 self.line_initialized = True
+                self.plan_versie += 1
                 self.logger.info(
                     f"Baanrichting afgeleid uit neus: {self.base_bearing_deg:.1f} graden."
                 )
@@ -298,14 +459,16 @@ class ABNavigator:
             # Rijrichting van de EERSTE baan uit de neus-richting: sta je bij B
             # in plaats van bij A, dan rijdt hij de lijn gewoon andersom af.
             if self.first_sign is None:
-                verschil = abs(self._norm180(curr_pos["heading"] - self.base_bearing_deg))
-                self.first_sign = -1.0 if verschil > 90.0 else 1.0
+                self.first_sign = self._eerste_richting(curr_pos["heading"], self.base_bearing_deg)
                 self.pass_sign = self.first_sign
+                self.plan_versie += 1
                 self.logger.info(
                     f"Eerste baan wordt gereden richting "
                     f"{'A->B' if self.first_sign > 0 else 'B->A'} "
                     f"(neus {curr_pos['heading']:.0f} graden)."
                 )
+
+            self._leg_spoor_vast(curr_pos)
 
             if self.state == "TRACKING":
                 self._handle_tracking(curr_pos)
@@ -334,8 +497,9 @@ class ABNavigator:
         if sign * (along - uitrij_along) >= 0.0:
             if self.order_index + 1 >= len(self.swath_order):
                 self.logger.info("Alle banen gereden. Missie klaar.")
-                self.status_message = "Missie klaar"
+                self.voltooid = True
                 self.stop()
+                self.status_message = "Missie klaar"
                 return
             self._plan_turn(along)
             self.state = "TURNING"
@@ -576,6 +740,10 @@ class ABNavigator:
         """Normaliseer een hoekverschil naar -180 .. +180 graden."""
         return (deg + 180.0) % 360.0 - 180.0
 
+    def _eerste_richting(self, heading_deg, lijn_koers_deg):
+        """Rijrichting van de eerste baan: +1 = A->B, -1 = B->A (neus meer dan 90 graden van de lijn af)."""
+        return -1.0 if abs(self._norm180(heading_deg - lijn_koers_deg)) > 90.0 else 1.0
+
     def _frame_bearing(self, d_along, d_cross):
         """Kompaskoers naar een punt dat (d_along, d_cross) verderop ligt."""
         return (self.base_bearing_deg + math.degrees(math.atan2(d_cross, d_along))) % 360.0
@@ -596,6 +764,16 @@ class ABNavigator:
         along = north * math.cos(b) + east * math.sin(b)
         right = -north * math.sin(b) + east * math.cos(b)
         return along, right
+
+    @staticmethod
+    def _frame_naar_latlon(along, cross, ref_lat, ref_lon, koers_deg):
+        """Precies de omkering van _along_cross(): baanframe -> [lat, lon] (7 decimalen, ca. 1 cm)."""
+        b = math.radians(koers_deg)
+        north = along * math.cos(b) - cross * math.sin(b)
+        east = along * math.sin(b) + cross * math.cos(b)
+        lat = ref_lat + math.degrees(north / R_EARTH)
+        lon = ref_lon + math.degrees(east / (R_EARTH * math.cos(math.radians(ref_lat))))
+        return [round(lat, 7), round(lon, 7)]
 
     def _haversine(self, lat1, lon1, lat2, lon2):
         phi1, phi2 = math.radians(lat1), math.radians(lat2)

@@ -1,5 +1,6 @@
 import os
 import json
+from typing import Optional
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -40,14 +41,17 @@ class ABMissionCommand(BaseModel):
     lon_a: float
     lat_b: float
     lon_b: float
-    lookahead_m: float = None
-    turn_speed_kmh: float = None
+    # Optional: de frontend stuurt null voor een veld zonder waarde (bv. een
+    # lijn zonder baan_volgorde in de json). Pydantic 2 weigert null anders
+    # met een 422, ook al is de standaardwaarde None.
+    lookahead_m: Optional[float] = None
+    turn_speed_kmh: Optional[float] = None
     # Missieplan uit data/ab_line.json (gemaakt met AB_mission_maker.py).
     # Zonder deze velden rijdt hij gewoon 0,1,2,... zoals vroeger.
-    swath_order: list = None
-    aantal_banen: int = None
+    swath_order: Optional[list] = None
+    aantal_banen: Optional[int] = None
     banen_overslaan: int = 1
-    kopakker_extra_m: float = None
+    kopakker_extra_m: Optional[float] = None
     kant: str = "rechts"
 
 class ABSliderUpdateCommand(BaseModel):
@@ -262,6 +266,59 @@ def update_ab_sliders(cmd: ABSliderUpdateCommand):
         "lookahead_m": ab_navigator.lookahead_m,
         "target_speed_kmh": ab_navigator.target_speed_kmh,
         "turn_speed_kmh": ab_navigator.turn_speed_kmh
+    }
+
+@router.get("/ab/plan")
+def ab_plan():
+    """Het geplande rijpad van de lopende (of laatst gestarte) AB-missie, in lat/lon."""
+    plan = ab_navigator.plan()
+    if plan is None:
+        return {"status": "leeg"}
+    return {"status": "ok", "plan": plan}
+
+@router.post("/ab/preview")
+def ab_preview(cmd: ABMissionCommand):
+    """
+    Het rijpad voor deze instellingen, zonder te starten: hetzelfde bericht
+    als /nav/start_ab. Rekent met dezelfde code als de missie zelf; een
+    lopende missie merkt er niets van.
+    """
+    plan = ab_navigator.preview(
+        cmd.lat_a, cmd.lon_a, cmd.lat_b, cmd.lon_b,
+        cmd.work_width_m, cmd.field_length_m,
+        swath_order=cmd.swath_order,
+        aantal_banen=cmd.aantal_banen,
+        banen_overslaan=cmd.banen_overslaan,
+        kopakker_extra_m=cmd.kopakker_extra_m,
+        kant=cmd.kant
+    )
+    if plan is None:
+        return {"status": "error",
+                "msg": "A en B vallen samen: de baanrichting volgt uit de neus van de robot, en die heeft nog geen GPS-fix."}
+    return {"status": "ok", "plan": plan}
+
+@router.get("/ab/live")
+def ab_live(spoor_vanaf: int = 0):
+    """
+    Alles wat de kaart een paar keer per seconde nodig heeft: de positie van
+    de robot, de voortgang van de AB-missie en het stuk gereden spoor vanaf
+    punt 'spoor_vanaf' (de kaart vraagt alleen op wat hij nog niet heeft).
+    """
+    vanaf, punten = ab_navigator.spoor_vanaf(spoor_vanaf)
+    return {
+        "pos": gps_system.get_current_position(),
+        "ab": {
+            "actief": ab_navigator.is_active,
+            "state": ab_navigator.state,
+            "bericht": ab_navigator.status_message,
+            "order_index": ab_navigator.order_index,
+            "baan": ab_navigator.current_swath,
+            "totaal_banen": len(ab_navigator.swath_order),
+            "voltooid": ab_navigator.voltooid,
+            "plan_versie": ab_navigator.plan_versie,
+            "missie_nr": ab_navigator.missie_nr
+        },
+        "spoor": {"vanaf": vanaf, "punten": punten}
     }
 
 @router.get("/waypoints")
