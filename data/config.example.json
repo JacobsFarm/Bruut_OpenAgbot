@@ -56,8 +56,8 @@
 
     "_comment_erpm": "Positieve eRPM = vooruit op beide wielen; de draairichting staat in de VESC zelf (Invert Motor Direction). Onder min_erpm draait een wiel niet: dat is 'Speed PID min ERPM' (s_pid_min_erpm = 900) in de VESC. Verlaag je die in VESC Tool, dan kan min_erpm mee omlaag. max_erpm mag later omhoog, maar niet boven Max ERPM in de VESC (nu 3700). max_erpm_reverse geldt alleen voor handmatig rijden; de navigatie rijdt nooit achteruit.",
     "min_erpm": 900,
-    "max_erpm": 3000,
-    "max_erpm_reverse": 1500,
+    "max_erpm": 3700,
+    "max_erpm_reverse": 2500,
 
     "_comment_omrekening": "10 poolparen x 5:1 kast = 50 eRPM per wiel-RPM. Omtrek van de 4.00-8 band (ca. 16 inch buitenmaat) = 1,277 m, dus 900 eRPM = 1,38 km/h en 3000 eRPM = 4,60 km/h. Kalibreren: 10 m rijden en distance_m in /api/motors vergelijken, of een omwenteling met de hand = 300 tacho-tellen.",
     "pole_pairs": 10,
@@ -125,7 +125,15 @@
     ],
     "yolo_model_path": "weights/Rumex.pt",
     "confidence_threshold": 0.4,
-    "trigger_lijn_y_percentage": 0.60, 
+    "rotatie_graden": 0,
+    "spiegel_horizontaal": false,
+    "spiegel_verticaal": false,
+    "tracking": {
+      "screenshot_interval_s": 0.5,
+      "max_screenshots_per_plant": 20,
+      "min_frames_voor_opslaan": 3,
+      "track_verlopen_s": 1.0
+    },
     "zones_aantal": 6,
     "zone_offsets_meters": [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5] 
   }

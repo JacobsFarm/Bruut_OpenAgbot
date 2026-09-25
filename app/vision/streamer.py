@@ -20,6 +20,13 @@ from app.vision.detection_logger import DetectionLogger
 from app.vision.weed_tracker import WeedTracker
 from app import gps_system
 
+_ROTATIES = {
+    0: None,
+    90: cv2.ROTATE_90_CLOCKWISE,
+    180: cv2.ROTATE_180,
+    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+}
+
 class VisionStreamer:
     def __init__(self, config):
         self.config = config
@@ -37,6 +44,14 @@ class VisionStreamer:
 
         self.model = YOLO(config['vision']['yolo_model_path'])
         self.conf_threshold = config['vision']['confidence_threshold']
+
+        # Beeldoriëntatie, bijv. 180 als de camera op zijn kop hangt
+        rotatie = int(config['vision'].get('rotatie_graden', 0)) % 360
+        if rotatie not in _ROTATIES:
+            raise ValueError(f"rotatie_graden moet 0, 90, 180 of 270 zijn (was {rotatie})")
+        self.rotatie = _ROTATIES[rotatie]
+        self.spiegel_horizontaal = config['vision'].get('spiegel_horizontaal', False)
+        self.spiegel_verticaal = config['vision'].get('spiegel_verticaal', False)
         
         # Initialiseer onze nieuwe scripts
         self.logger = DetectionLogger()
@@ -57,6 +72,18 @@ class VisionStreamer:
         self.running = True
         threading.Thread(target=self._capture_loop, daemon=True).start()
         threading.Thread(target=self._inference_loop, daemon=True).start()
+
+    def _orienteer(self, frame):
+        """Draait/spiegelt het camerabeeld volgens de config, vóór inference en opslag."""
+        if self.rotatie is not None:
+            frame = cv2.rotate(frame, self.rotatie)
+        if self.spiegel_horizontaal and self.spiegel_verticaal:
+            frame = cv2.flip(frame, -1)
+        elif self.spiegel_horizontaal:
+            frame = cv2.flip(frame, 1)
+        elif self.spiegel_verticaal:
+            frame = cv2.flip(frame, 0)
+        return frame
 
     def _capture_loop(self):
         if self.camera_type == 'gx':
@@ -100,7 +127,7 @@ class VisionStreamer:
 
             rgb = raw.convert("RGB")
             img = rgb.get_numpy_array()
-            frame = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            frame = self._orienteer(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
             # Queue vol = inference kan GPU-piek niet bijhouden: gooi oude frames weg
             # zodat de inference altijd een recente frame krijgt.
@@ -151,6 +178,7 @@ class VisionStreamer:
         while self.running:
             ret, frame = cap.read()
             if ret:
+                frame = self._orienteer(frame)
                 with self.lock:
                     self.latest_frame = frame
 
@@ -204,23 +232,22 @@ class VisionStreamer:
                 # Teken de blokken op de nieuwe frame (voor het dashboard en de save)
                 annotated_frame = results[0].plot()
 
-                # Teken de denkbeeldige trigger lijn voor de live feed (visuele feedback)
-                lijn_y = int(frame_hoogte * self.tracker.lijn_y_ratio)
-                cv2.line(annotated_frame, (0, lijn_y), (frame_breedte, lijn_y), (0, 0, 255), 2) # Rode lijn
+                # Planten die in beeld zijn worden getrackt; per plant meerdere screenshots zolang hij in beeld is
+                screenshots, afgerond = self.tracker.verwerk_tracks(results[0], frame_breedte, frame_hoogte)
 
-                # Controleer of er getrackte objecten de lijn passeren
-                triggers = self.tracker.verwerk_tracks(results[0], frame_breedte, frame_hoogte)
-
-                # Voor elke getriggerde detectie, vraag GPS en log alles!
-                for weed_data in triggers:
+                # Voor elke screenshot-opdracht: vraag GPS en log alles!
+                for weed_data in screenshots:
                     pos = gps_system.current_position
-                    
+
                     # Voeg actuele GPS coördinaten toe aan de dataset
                     weed_data["lat"] = pos["lat"]
                     weed_data["lon"] = pos["lon"]
-                    
-                    # Oproepen logger
-                    self.logger.log_detection(clean_frame, annotated_frame, weed_data)
+
+                    self.logger.log_screenshot(clean_frame, annotated_frame, weed_data)
+
+                # Planten die uit beeld zijn: detectie afsluiten
+                for track_id in afgerond:
+                    self.logger.sluit_detectie(track_id)
 
                 with self.lock:
                     self.latest_annotated_frame = annotated_frame
