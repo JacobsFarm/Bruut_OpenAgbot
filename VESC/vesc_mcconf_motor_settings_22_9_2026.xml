@@ -5,7 +5,7 @@
     <comm_mode>0</comm_mode>
     <motor_type>2</motor_type>
     <sensor_mode>0</sensor_mode>
-    <l_current_max>15</l_current_max>
+    <l_current_max>20</l_current_max>
     <l_current_min>-10</l_current_min>
     <l_in_current_max>20</l_in_current_max>
     <l_in_current_min>-3</l_in_current_min>
@@ -19,8 +19,8 @@
     <l_max_erpm_fbrake_cc>1500</l_max_erpm_fbrake_cc>
     <l_min_vin>14</l_min_vin>
     <l_max_vin>65</l_max_vin>
-    <l_battery_cut_start>49</l_battery_cut_start>
-    <l_battery_cut_end>47</l_battery_cut_end>
+    <l_battery_cut_start>42</l_battery_cut_start>
+    <l_battery_cut_end>40</l_battery_cut_end>
     <l_battery_regen_cut_start>56</l_battery_regen_cut_start>
     <l_battery_regen_cut_end>57.5</l_battery_regen_cut_end>
     <l_slow_abs_current>0</l_slow_abs_current>
