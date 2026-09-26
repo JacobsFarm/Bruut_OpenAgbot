@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 import threading
 import time
 import os
@@ -91,6 +92,65 @@ class VisionStreamer:
         else:
             self._capture_loop_cv()
 
+    @staticmethod
+    def _maak_gamma_lut(gamma):
+        """Software gamma (<1 = lichter, >1 = donkerder). 1.0 = uit."""
+        if not gamma or gamma == 1.0:
+            return None
+        return np.array([255 * (i / 255.0) ** gamma for i in range(256)], dtype=np.uint8)
+
+    def _configureer_gx(self, cam, cfg):
+        """Stelt de Daheng camera in vanuit config. Elke optie is optioneel en
+        een niet-ondersteunde feature op dit model wordt gelogd, niet fataal."""
+
+        def zet(naam, actie):
+            try:
+                actie()
+            except Exception as e:
+                print(f"[VISION] Instelling '{naam}' niet toegepast: {e}")
+
+        auto = {"off": gx.GxAutoEntry.OFF, "once": gx.GxAutoEntry.ONCE,
+                "continuous": gx.GxAutoEntry.CONTINUOUS}
+
+        # Belichting
+        if cfg.get('exposure_auto', True):
+            zet('exposure_auto', lambda: cam.ExposureAuto.set(gx.GxAutoEntry.CONTINUOUS))
+            zet('exposure_max_us', lambda: cam.AutoExposureTimeMax.set(cfg.get('exposure_max_us', 500)))
+            zet('exposure_min_us', lambda: cam.AutoExposureTimeMin.set(cfg.get('exposure_min_us', 100)))
+        else:
+            zet('exposure_auto', lambda: cam.ExposureAuto.set(gx.GxAutoEntry.OFF))
+            zet('exposure_us', lambda: cam.ExposureTime.set(cfg.get('exposure_us', 600)))
+
+        # Gain
+        if cfg.get('gain_auto', True):
+            zet('gain_auto', lambda: cam.GainAuto.set(gx.GxAutoEntry.CONTINUOUS))
+            zet('gain_max_db', lambda: cam.AutoGainMax.set(cfg.get('gain_max_db', 16)))
+            zet('gain_min_db', lambda: cam.AutoGainMin.set(cfg.get('gain_min_db', 0)))
+        else:
+            zet('gain_auto', lambda: cam.GainAuto.set(gx.GxAutoEntry.OFF))
+            zet('gain_db', lambda: cam.Gain.set(cfg.get('gain_db', 8)))
+
+        # Streefhelderheid voor auto-belichting/gain (0-255), hoger = lichter beeld
+        if cfg.get('expected_gray') is not None:
+            zet('expected_gray', lambda: cam.ExpectedGrayValue.set(cfg['expected_gray']))
+
+        # Hardware gamma en zwartniveau
+        if cfg.get('gamma') is not None:
+            zet('gamma', lambda: cam.GammaEnable.set(True))
+            zet('gamma', lambda: cam.Gamma.set(cfg['gamma']))
+        if cfg.get('black_level') is not None:
+            zet('black_level', lambda: cam.BlackLevel.set(cfg['black_level']))
+
+        # Witbalans: off / once / continuous
+        wb = str(cfg.get('white_balance', 'once')).lower()
+        zet('white_balance', lambda: cam.BalanceWhiteAuto.set(auto.get(wb, gx.GxAutoEntry.ONCE)))
+
+        print(f"[VISION] Camera-instellingen toegepast: "
+              f"exposure={'auto' if cfg.get('exposure_auto', True) else str(cfg.get('exposure_us', 600)) + 'us'}, "
+              f"gain={'auto' if cfg.get('gain_auto', True) else str(cfg.get('gain_db', 8)) + 'dB'}, "
+              f"gamma={cfg.get('gamma')}, software_gamma={cfg.get('software_gamma', 1.0)}, "
+              f"software_gain={cfg.get('software_gain', 1.0)}, wb={wb}")
+
     def _capture_loop_gx(self):
         if gx is None:
             print("[VISION] gxipy niet geïnstalleerd. Kan Daheng camera niet starten.")
@@ -108,13 +168,9 @@ class VisionStreamer:
 
         cam = device_manager.open_device_by_index(cfg.get('index', 1))
 
-        cam.ExposureAuto.set(gx.GxAutoEntry.CONTINUOUS)
-        cam.AutoExposureTimeMax.set(cfg.get('exposure_max_us', 500))
-        cam.AutoExposureTimeMin.set(cfg.get('exposure_min_us', 100))
-        cam.GainAuto.set(gx.GxAutoEntry.CONTINUOUS)
-        cam.AutoGainMax.set(cfg.get('gain_max_db', 16))
-        cam.AutoGainMin.set(cfg.get('gain_min_db', 0))
-        cam.BalanceWhiteAuto.set(gx.GxAutoEntry.ONCE)
+        self._configureer_gx(cam, cfg)
+        gamma_lut = self._maak_gamma_lut(cfg.get('software_gamma', 1.0))
+        software_gain = float(cfg.get('software_gain', 1.0))
 
         cam.stream_on()
         print(f"[VISION] Daheng camera gestart op {cfg.get('fps', 15)} fps.")
@@ -127,7 +183,12 @@ class VisionStreamer:
 
             rgb = raw.convert("RGB")
             img = rgb.get_numpy_array()
-            frame = self._orienteer(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            frame = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            if software_gain != 1.0:
+                frame = cv2.convertScaleAbs(frame, alpha=software_gain)
+            if gamma_lut is not None:
+                frame = cv2.LUT(frame, gamma_lut)
+            frame = self._orienteer(frame)
 
             # Queue vol = inference kan GPU-piek niet bijhouden: gooi oude frames weg
             # zodat de inference altijd een recente frame krijgt.
