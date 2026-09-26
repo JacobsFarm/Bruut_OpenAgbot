@@ -109,10 +109,20 @@
     "gx_camera": {
       "index": 1,
       "fps": 15,
+      "exposure_auto": true,
+      "exposure_us": 600,
       "exposure_min_us": 100,
-      "exposure_max_us": 500,
+      "exposure_max_us": 800,
+      "gain_auto": true,
+      "gain_db": 8,
       "gain_min_db": 0,
-      "gain_max_db": 16
+      "gain_max_db": 20,
+      "expected_gray": 120,
+      "gamma": 0.5,
+      "black_level": null,
+      "white_balance": "once",
+      "software_gamma": 1.0,
+      "software_gain": 1.0
     },
     "usb_camera": {
       "index": 0,
