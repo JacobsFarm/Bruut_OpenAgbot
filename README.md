@@ -17,8 +17,9 @@ later the project wil immigrate to ROS 2 and Floxglove
 ## openscad project
 New cad designs after testing in the Field, stronger and more realistic designs and even more oppertunity for extensions
 
-<img width="2380" height="1792" alt="Gemini_Generated_Image_6x3t376x3t376x3t" src="https://github.com/user-attachments/assets/882ea169-424b-40ec-9939-3123089498dc" />
-<img width="4080" height="3072" alt="PXL_20260816_183617888(1)" src="https://github.com/user-attachments/assets/71f47128-760a-4249-89a0-035e53f4c85b" />
+<img width="720" height="480" alt="animation_drive_turn" src="https://github.com/user-attachments/assets/49eb5dfe-64b1-4a17-869a-e7976fb5139c" />
+<img width="960" height="600" alt="animatie_ridderzuringfrees" src="https://github.com/user-attachments/assets/940ccaf9-857f-469f-9b4d-2fb125ced8bd" />
+<img width="720" height="480" alt="animation_strip_ground_following" src="https://github.com/user-attachments/assets/e09fd2fb-2b51-476d-912c-c25dd1616150" />
 
 **4 wheeldrive designs** with 4 electric driven hubmotors
 <img width="670" height="468" alt="Schermafbeelding 2026-05-24 135653" src="https://github.com/user-attachments/assets/44cab0dc-73f4-4b09-ba7e-08376c236620" />
