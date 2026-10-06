@@ -3,6 +3,7 @@ Project for making the Bruut_OpenAgbot
 
 Follow along the project on youtube: https://www.youtube.com/@opensource_agbot/videos
 Visit the website for more information https://jacobsfarm.github.io/Bruut_openagbot_website/ 
+Go for the implements to the special repo https://github.com/JacobsFarm/Bruut_OpenAgbot_Implements
 
 newest configuration the 2WD: with AB line driving
 <img width="4000" height="2250" alt="DJI_0523" src="https://github.com/user-attachments/assets/4cc46809-3ec2-4927-9e47-56f9b0d914db" />
