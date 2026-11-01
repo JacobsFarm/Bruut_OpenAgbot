@@ -4,6 +4,21 @@ from datetime import datetime
 
 from app.hardware.motor_logic import LOG_COLUMNS as MOTOR_KOLOMMEN
 
+# Uit GpsSystem.get_current_position(): wat de ZED-X20D per meting meegeeft.
+GNSS_KOLOMMEN = [
+    ("Fix_Soort", "fix_soort"), ("Heading_Bron", "heading_bron"),
+    ("Draaisnelheid_dps", "draaisnelheid_dps"), ("Sliphoek_deg", "sliphoek_deg"),
+    ("Rijrichting", "rijrichting"), ("Pos_Leeftijd_s", "positie_leeftijd_s"),
+    ("Correctie_Leeftijd_s", "correctie_leeftijd_s"), ("Voorspeld_s", "voorspeld_s"),
+    # UBX-NAV-DAHEADING: leeg zolang het board hem niet stuurt.
+    ("Baseline_m", "baseline_m"), ("Hoogteverschil_m", "antenne_hoogteverschil_m"),
+    ("Pitch_deg", "pitch_deg"), ("DAH_Heading", "dah_heading"),
+    ("DAH_AccHeading", "dah_acc_heading"), ("DAH_Oplossing", "dah_oplossing"),
+    ("DAH_Leeftijd_s", "dah_leeftijd_s"),
+    ("Pitch_Correctie_m", "pitch_correctie_m"), ("Hoogte_Grond_m", "hoogte_grond_m"),
+    ("Ruwheid_deg", "ruwheid_deg"),
+]
+
 class DriveLogger:
     def __init__(self):
         self.log_file = None
@@ -24,6 +39,7 @@ class DriveLogger:
                     "Heading_Echt", "Heading_Doel", "Heading_Fout",
                     "Stuurhoek", "Doel_kmh", "Echt_kmh",
                     "Afstand_tot_WP_m", "Lookahead_m", "Loop_Tijd_s",
+                    "Afwijking_m", "Regelaar", *[k for k, _ in GNSS_KOLOMMEN],
                     *MOTOR_KOLOMMEN
                 ])
         except Exception:
@@ -32,12 +48,14 @@ class DriveLogger:
     def log_regel(self, modus="", wp_idx=0, lat=0.0, lon=0.0, fix=0, hdop=99.0,
                   heading_echt=0.0, heading_doel=0.0, heading_fout=0.0,
                   stuurhoek=0.0, doel_kmh=0.0, echt_kmh=0.0,
-                  dist_wp=0.0, lookahead=0.0, dt=0.0, motor=None):
+                  dist_wp=0.0, lookahead=0.0, dt=0.0, motor=None,
+                  xte=None, regelaar="", gnss=None):
         if not self.log_file:
             return
 
         # Aandrijfdata van de VESC's (VehicleController.log_snapshot()).
         motor = motor or {}
+        gnss = gnss or {}
         try:
             with open(self.log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
@@ -53,6 +71,8 @@ class DriveLogger:
                     round(dist_wp, 3) if dist_wp else 0.0, 
                     round(lookahead, 2) if lookahead else 0.0, 
                     round(dt, 4) if dt else 0.0,
+                    "" if xte is None else round(xte, 3), regelaar,
+                    *[gnss.get(k, "") if gnss.get(k) is not None else "" for _, k in GNSS_KOLOMMEN],
                     *[motor.get(k, "") for k in MOTOR_KOLOMMEN]
                 ])
         except Exception:

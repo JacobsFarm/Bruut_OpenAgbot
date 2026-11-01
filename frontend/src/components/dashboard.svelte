@@ -19,6 +19,12 @@
         : null;
 
     $: fix = fixInfo(gps?.fix);
+    // Diagnostiek van de ZED-X20D: gemeten rates, NTRIP en heading-bron.
+    $: gnss = gps?.gnss;
+    $: richting = gps?.rijrichting === 1 ? 'vooruit' : gps?.rijrichting === -1 ? 'achteruit' : 'stil / onbekend';
+    $: headingTekst = !gps ? '–'
+        : gps.heading_geldig ? (gps.heading_bron === 'VTG' ? 'VTG (noodval, geen THS)' : gps.heading_bron)
+        : 'ongeldig';
 
     function ladingKleur(pct) {
         if (pct >= 50) return 'groen';
@@ -84,11 +90,45 @@
         </section>
 
         <section class="kaart">
-            <h3>GPS</h3>
+            <h3>GNSS (ZED-X20D)</h3>
             <div class="badge {fix.kleur}">{fix.tekst}</div>
             <div class="regel"><span>Latitude</span><b class="mono">{fmt(gps?.lat, 8)}</b></div>
             <div class="regel"><span>Longitude</span><b class="mono">{fmt(gps?.lon, 8)}</b></div>
-            <div class="regel"><span>HDOP</span><b>{fmt(gps?.hdop, 2)}</b></div>
+            <div class="regel"><span>HDOP / satellieten</span><b>{fmt(gps?.hdop, 2)} / {gps?.sats ?? '–'}</b></div>
+            <div class="regel">
+                <span>Heading</span>
+                <b class:let-op={gps && (!gps.heading_geldig || gps.heading_bron === 'VTG')}>{fmt(gps?.heading, 1)}° · {headingTekst}</b>
+            </div>
+            <div class="regel">
+                <span>Positie / heading</span>
+                <b class:let-op={gnss && (gnss.positie_hz < 20 || gnss.heading_hz < 20)}>{fmt(gnss?.positie_hz, 1)} / {fmt(gnss?.heading_hz, 1)} Hz</b>
+            </div>
+            <div class="regel"><span>Draaisnelheid</span><b>{fmt(gps?.draaisnelheid_dps, 1)} °/s</b></div>
+            <div class="regel">
+                <span>Rijrichting / slip</span>
+                <b class:let-op={gps?.sliphoek_deg !== null && gps?.sliphoek_deg !== undefined && Math.abs(gps.sliphoek_deg) > 5}>
+                    {richting}{gps?.sliphoek_deg !== null && gps?.sliphoek_deg !== undefined ? ` · ${fmt(gps.sliphoek_deg, 1)}°` : ''}
+                </b>
+            </div>
+            <div class="regel">
+                <span>Correcties (NTRIP)</span>
+                <b class:let-op={gnss && gnss.ntrip_status !== 'verbonden'}>
+                    {gnss?.ntrip_status ?? '–'}{gps?.correctie_leeftijd_s !== null && gps?.correctie_leeftijd_s !== undefined ? ` · ${fmt(gps.correctie_leeftijd_s, 1)} s oud` : ''}
+                </b>
+            </div>
+            <div class="regel">
+                <span>Antennes (DAHEADING)</span>
+                <b class:let-op={gps && gps.baseline_m === null}>
+                    {#if gps?.baseline_m !== null && gps?.baseline_m !== undefined}
+                        {fmt(gps.baseline_m, 3)} m · {gps.antenne_hoogteverschil_m >= 0 ? '+' : ''}{fmt(gps.antenne_hoogteverschil_m * 100, 1)} cm · {gps.dah_oplossing}
+                    {:else}
+                        niet ontvangen ({gnss?.daheading_config ?? '–'})
+                    {/if}
+                </b>
+            </div>
+            {#if gnss?.ntrip_fout}
+                <div class="melding rood">{gnss.ntrip_fout}</div>
+            {/if}
             <div class="regel"><span>Missie</span><b class="rechts-uitlijnen">{missie}</b></div>
         </section>
 

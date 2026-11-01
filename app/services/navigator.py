@@ -3,6 +3,8 @@ import time
 import threading
 import logging
 
+from app.services.gnss_navigatie import GnssBewaker, LijnRegelaar, lijn_frame, peiling, norm180
+
 # Optioneel: Importeer je bestaande logger als je die nog gebruikt voor analyse
 try:
     from app.services.logger import DriveLogger
@@ -12,8 +14,16 @@ except ImportError:
 class Navigator:
     """
     De 'Routeplanner en Chauffeur' van de AgBot.
-    Volgt een lijst met GPS-waypoints via het Pure Pursuit algoritme.
-    Geheel onafhankelijk van hardware-specifieke (motor) logica.
+    Volgt een lijst met GPS-waypoints. Geheel onafhankelijk van
+    hardware-specifieke (motor) logica.
+
+    Hij volgt het LIJNSTUK van het vorige punt (bij het eerste punt: de
+    startpositie) naar het huidige, met dezelfde LijnRegelaar als de
+    AB-banen (Stanley of pure pursuit). Een punt is bereikt binnen de
+    aankomstdrempel, of zodra de robot de loodlijn door het punt passeert -
+    met RTK hoeft hij er niet exact overheen om door te gaan.
+    De regellus loopt op het ritme van de GNSS (25 Hz) en de GnssBewaker
+    bepaalt of en hoe hard er gereden wordt.
     """
     def __init__(self, gps_system, vehicle_controller, config):
         self.logger = logging.getLogger(__name__)
@@ -50,9 +60,14 @@ class Navigator:
         self.target_speed_kmh = 0.0
         self.mode = "pure_pursuit"
         
+        self.bewaker = GnssBewaker(config)
+        self.regelaar = LijnRegelaar(config, self.wheelbase, self.max_angle)
+        self.mode = self.regelaar.soort
+        self.segment_start = None      # (lat, lon) waar het huidige lijnstuk begint
+
         self.is_active = False
         self.nav_thread = None
-        self.state = "IDLE"            # IDLE | WACHT_OP_FIX | RIJDEN | KLAAR | FOUT
+        self.state = "IDLE"            # IDLE | WACHT_OP_GNSS | RIJDEN | KLAAR | FOUT
         self.status_message = "Gestopt"
 
     def load_route(self, waypoints, speed_kmh):
@@ -62,6 +77,7 @@ class Navigator:
         """
         self.waypoints = waypoints
         self.current_wp_index = 0
+        self.segment_start = None
         self.target_speed_kmh = speed_kmh
         self.logger.info(f"Route geladen met {len(waypoints)} waypoints. Doelsnelheid: {speed_kmh} km/h")
 
@@ -80,6 +96,7 @@ class Navigator:
         if self.drive_logger:
             self.drive_logger.start_nieuwe_rit(navigatie_modus="Waypoint_Route")
 
+        self.segment_start = None      # eerste lijnstuk begint waar de robot nu staat
         self.is_active = True
         self.state = "RIJDEN"
         self.status_message = f"Route actief ({len(self.waypoints)} punten)"
@@ -104,14 +121,11 @@ class Navigator:
 
     def _navigation_loop(self):
         """
-        De hoofd-regellus (10 Hz). Berekent continu de positie, 
-        het volgende doel en de benodigde stuurcorrectie.
+        De hoofd-regellus, op het ritme van de GNSS (25 Hz). Berekent continu
+        de positie, het volgende doel en de benodigde stuurcorrectie.
         """
-        rate_hz = 10.0
-        interval = 1.0 / rate_hz
-
         try:
-            self._run_loop(interval)
+            self._run_loop()
         except Exception as e:
             # Een onafgevangen fout zou de (daemon) thread stil laten sterven:
             # geen rijden, geen logging, geen melding. Hier maken we hem zichtbaar.
@@ -124,9 +138,15 @@ class Navigator:
             if self.drive_logger:
                 self.drive_logger.stop_log()
 
-    def _run_loop(self, interval):
+    def _run_loop(self):
+        epoch = -1
+        vorige = time.time()
         while self.is_active and self.current_wp_index < len(self.waypoints):
-            start_time = time.time()
+            # Rekenen zodra er een nieuwe meting is (25 Hz); na 0.1 s zonder
+            # data toch een rondje, dan zet de GnssBewaker hem stil.
+            epoch = self.gps.wacht_op_epoch(epoch, timeout=0.1)
+            nu = time.time()
+            dt, vorige = nu - vorige, nu
 
             # 0. Aandrijving in orde? CAN weg, een VESC-fout of een vastgelopen
             #    wiel beeindigt de missie; opnieuw rijden gaat via een nieuwe start.
@@ -137,17 +157,15 @@ class Navigator:
                 self.logger.error(f"Navigatie gestopt, aandrijving: {fout}")
                 break
 
-            # 1. Haal de nieuwste (hybride) GPS data op
+            # 1. Nieuwste GNSS-meting, en mag daarop gereden worden?
             curr_pos = self.gps.get_current_position()
-
-            if not curr_pos or curr_pos.get("lat") == 0.0 or curr_pos.get("fix", 0) < 2:
-                self.state = "WACHT_OP_FIX"
-                self.status_message = (
-                    f"Wachten op RTK-fix (fix={curr_pos.get('fix', 0) if curr_pos else 0})"
-                )
-                self.logger.warning("Wachten op goede GPS/RTK fix...")
-                self.vehicle.drive(0.0, 0.0) # Veiligheid: stop met rijden bij slecht signaal
-                time.sleep(0.5)
+            snelheid, melding = self.bewaker.beoordeel(curr_pos, self.target_speed_kmh)
+            if snelheid <= 0.0:
+                if self.state != "WACHT_OP_GNSS":
+                    self.logger.warning(f"Navigatie wacht: {melding}")
+                self.state = "WACHT_OP_GNSS"
+                self.status_message = melding
+                self.vehicle.drive(0.0, 0.0) # Veiligheid: stilstaan zonder goede GNSS
                 continue
 
             self.state = "RIJDEN"
@@ -155,19 +173,32 @@ class Navigator:
             curr_lat = curr_pos["lat"]
             curr_lon = curr_pos["lon"]
             curr_heading = curr_pos["heading"]
-            
-            # 2. Bepaal het huidige doelpunt (Waypoint)
+            if self.segment_start is None:
+                self.segment_start = (curr_lat, curr_lon)
+
+            # 2. Huidig lijnstuk: van segment_start naar het doelpunt
             target_wp = self.waypoints[self.current_wp_index]
             is_last_wp = (self.current_wp_index == len(self.waypoints) - 1)
-            
-            # 3. Bereken afstand en absolute richting (Bearing) naar waypoint
+            start_lat, start_lon = self.segment_start
+            lengte = self._calculate_distance(start_lat, start_lon, target_wp["lat"], target_wp["lon"])
             distance = self._calculate_distance(curr_lat, curr_lon, target_wp["lat"], target_wp["lon"])
-            target_bearing = self._calculate_bearing(curr_lat, curr_lon, target_wp["lat"], target_wp["lon"])
-            
-            # 4. Check of we zijn aangekomen bij het doelpunt
+            if lengte < 0.5:
+                # Punt ligt op het vorige (of op de startplek): koers recht naar het punt.
+                lijn_koers = self._calculate_bearing(curr_lat, curr_lon, target_wp["lat"], target_wp["lon"])
+                langs, afwijking = 0.0, 0.0
+            else:
+                lijn_koers = peiling(start_lat, start_lon, target_wp["lat"], target_wp["lon"])
+                langs, afwijking = lijn_frame(curr_lat, curr_lon, start_lat, start_lon, lijn_koers)
+
+            # 3. Aangekomen: binnen de drempel, of de loodlijn door het punt gepasseerd
             threshold = self.arrival_threshold_final if is_last_wp else self.arrival_threshold_inter
-            if distance <= threshold:
-                self.logger.info(f"Waypoint {self.current_wp_index} bereikt (afstand: {distance:.2f}m).")
+            gepasseerd = lengte >= 0.5 and langs >= lengte
+            if distance <= threshold or gepasseerd:
+                self.logger.info(
+                    f"Waypoint {self.current_wp_index} bereikt (afstand {distance:.2f} m"
+                    f"{', loodlijn gepasseerd' if gepasseerd and distance > threshold else ''})."
+                )
+                self.segment_start = (target_wp["lat"], target_wp["lon"])
                 self.current_wp_index += 1
                 if self.current_wp_index >= len(self.waypoints):
                     self.state = "KLAAR"
@@ -175,53 +206,46 @@ class Navigator:
                     self.logger.info("🏁 Eindbestemming bereikt! Missie voltooid.")
                     break # Verlaat de loop, we zijn klaar!
                 continue # Direct doorrekenen naar volgende waypoint
-                
-            # 5. PURE PURSUIT BEREKENING
-            # Alpha: De hoek tussen onze huidige neus en de lijn naar het doelpunt
-            alpha = target_bearing - curr_heading
-            alpha = (alpha + 180) % 360 - 180 # Normaliseer naar -180 tot +180 graden
-            
-            # Delta (Stuurhoek): pure pursuit formule -> atan2(2 * Wielbasis * sin(alpha), Lookahead)
-            alpha_rad = math.radians(alpha)
-            desired_steering_angle = math.degrees(
-                math.atan2(2.0 * self.wheelbase * math.sin(alpha_rad), self.lookahead_distance)
+
+            # 4. Stuurhoek met de LijnRegelaar (Stanley of pure pursuit)
+            final_steering_angle = self.regelaar.stuur(
+                curr_heading, lijn_koers, afwijking, curr_pos.get("speed_kmh", 0.0),
+                curr_pos.get("draaisnelheid_dps", 0.0), self.lookahead_distance,
+                lijn_id=(id(self.waypoints), self.current_wp_index), dt=dt
             )
-            
-            # Beperk de hoek tot de fysieke limieten van het zwenkwiel
-            final_steering_angle = max(-self.max_angle, min(self.max_angle, desired_steering_angle))
-            
-            # 6. STUUR HET VOERTUIG AAN
+
+            # 5. STUUR HET VOERTUIG AAN
             # De VehicleController handelt het differentieel, smoothing en anti-stall af.
-            self.vehicle.drive(self.target_speed_kmh, final_steering_angle)
-            
-            # 7. LOGGING (Optioneel, overgenomen uit je oude code)
+            self.vehicle.drive(snelheid, final_steering_angle)
+            self.status_message = (
+                f"Naar punt {self.current_wp_index + 1}/{len(self.waypoints)}: nog {distance:.1f} m, "
+                f"afwijking {afwijking:+.2f} m" + (f" | {melding}" if melding else "")
+            )
+
+            # 6. LOGGING
             if self.drive_logger:
                 try:
                     self.drive_logger.log_regel(
-                        wp_idx=self.current_wp_index, 
+                        wp_idx=self.current_wp_index,
                         modus=self.mode,
-                        lat=curr_lat, 
+                        lat=curr_lat,
                         lon=curr_lon,
-                        fix=curr_pos.get("fix", 0), 
+                        fix=curr_pos.get("fix", 0),
                         hdop=curr_pos.get("hdop", 99.0),
-                        heading_echt=curr_heading, 
-                        heading_doel=target_bearing,
-                        heading_fout=alpha, 
+                        heading_echt=curr_heading,
+                        heading_doel=lijn_koers,
+                        heading_fout=norm180(lijn_koers - curr_heading),
                         stuurhoek=final_steering_angle,
-                        doel_kmh=self.target_speed_kmh, 
+                        doel_kmh=snelheid,
                         echt_kmh=curr_pos.get("speed_kmh", 0.0),
                         dist_wp=distance,
                         lookahead=self.lookahead_distance,
-                        dt=(time.time() - start_time),
-                        motor=self.vehicle.log_snapshot()
+                        dt=dt,
+                        motor=self.vehicle.log_snapshot(),
+                        xte=afwijking, regelaar=self.regelaar.soort, gnss=curr_pos
                     )
                 except Exception as e:
                     self.logger.error(f"Fout bij loggen: {e}")
-            
-            # 8. Wacht strak tot het volgende 10Hz tick-moment
-            elapsed = time.time() - start_time
-            sleep_time = max(0.01, interval - elapsed)
-            time.sleep(sleep_time)
 
         # Afronden (stoppen, logbestand afsluiten) gebeurt in _navigation_loop().
 

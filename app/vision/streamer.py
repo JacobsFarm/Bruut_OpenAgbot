@@ -53,7 +53,12 @@ class VisionStreamer:
         self.rotatie = _ROTATIES[rotatie]
         self.spiegel_horizontaal = config['vision'].get('spiegel_horizontaal', False)
         self.spiegel_verticaal = config['vision'].get('spiegel_verticaal', False)
-        
+        # Waar op de grond het midden van het camerabeeld ligt, t.o.v. het
+        # voetpunt van antenne GPS1 (vooruit = +, rechts = +). Daarmee krijgt
+        # elke onkruidplant zijn eigen positie in plaats van die van de antenne.
+        self.camera_vooruit_m = float(config['vision'].get('camera_offset_forward_m', 0.0))
+        self.camera_rechts_m = float(config['vision'].get('camera_offset_right_m', 0.0))
+
         # Initialiseer onze nieuwe scripts
         self.logger = DetectionLogger()
         self.tracker = WeedTracker(config)
@@ -298,11 +303,19 @@ class VisionStreamer:
 
                 # Voor elke screenshot-opdracht: vraag GPS en log alles!
                 for weed_data in screenshots:
-                    pos = gps_system.current_position
+                    # Positie van de plant op de GROND: camerapunt t.o.v.
+                    # antenne GPS1 plus de zone in beeld (links/rechts),
+                    # gecorrigeerd voor koers, latentie en pitch. Zonder
+                    # geldige koers de positie van de robot zelf.
+                    punt = gps_system.punt_op_grond(
+                        self.camera_vooruit_m, self.camera_rechts_m + weed_data.get("offset_m", 0.0)
+                    )
+                    if punt is None:
+                        pos = gps_system.current_position
+                        punt = (pos["lat"], pos["lon"])
 
                     # Voeg actuele GPS coördinaten toe aan de dataset
-                    weed_data["lat"] = pos["lat"]
-                    weed_data["lon"] = pos["lon"]
+                    weed_data["lat"], weed_data["lon"] = punt
 
                     self.logger.log_screenshot(clean_frame, annotated_frame, weed_data)
 

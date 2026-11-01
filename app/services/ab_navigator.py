@@ -3,6 +3,8 @@ import time
 import threading
 import logging
 
+from app.services.gnss_navigatie import GnssBewaker, LijnRegelaar
+
 try:
     from app.services.logger import DriveLogger
 except ImportError:
@@ -61,6 +63,13 @@ class ABNavigator:
                  'kopakker_extra_m' meter rechte aanloop om kaarsrecht op de
                  nieuwe lijn te liggen voordat het gewas begint.
       4. EIND  : als de hele werkvolgorde gereden is, stopt de missie.
+
+    De regellus loopt op het ritme van de GNSS (25 Hz): hij rekent zodra er
+    een complete meting (positie + heading) binnen is. Op de rechte banen
+    stuurt de LijnRegelaar (Stanley: koersfout + afwijking van de vooras +
+    demping op de draaisnelheid), in de bochten pure pursuit over het
+    bochtpad. De GnssBewaker bepaalt per meting of en hoe hard er gereden mag
+    worden (RTK fixed / float / geen RTK, leeftijd van data en correcties).
     """
 
     def __init__(self, gps_system, vehicle_controller, config):
@@ -99,6 +108,12 @@ class ABNavigator:
         self.turn_timeout_s = nav_cfg.get("turn_timeout_s", 90.0)
         # Sample-afstand van het bochtpad (m). Kleiner = gladder, meer punten.
         self.turn_step_m = 0.25
+
+        self.bewaker = GnssBewaker(config)
+        self.regelaar = LijnRegelaar(config, self.wheelbase, self.max_angle)
+        self.toegestaan_kmh = 0.0        # wat de GnssBewaker deze stap toestaat
+        self.gnss_melding = None         # bv. "RTK float - langzaam", of None
+        self._dt = 0.04                  # werkelijke tijd sinds de vorige regelstap
 
         # Missie-parameters (gezet via start_mission)
         self.work_width_m = 4.0
@@ -421,11 +436,15 @@ class ABNavigator:
             self.vehicle.stop()
 
     def _run_loop(self):
-        rate_hz = 10.0
-        interval = 1.0 / rate_hz
+        epoch = -1
+        vorige = time.time()
 
         while self.is_active:
-            start_time = time.time()
+            # Rekenen zodra er een nieuwe meting is (25 Hz). Komt er 0.1 s
+            # niets, dan toch een rondje: de GnssBewaker zet hem dan stil.
+            epoch = self.gps.wacht_op_epoch(epoch, timeout=0.1)
+            nu = time.time()
+            self._dt, vorige = nu - vorige, nu
 
             # Aandrijving in orde? CAN weg, een VESC-fout of een vastgelopen
             # wiel beeindigt de missie; opnieuw rijden gaat via een nieuwe start.
@@ -438,11 +457,13 @@ class ABNavigator:
 
             curr_pos = self.gps.get_current_position()
 
-            # Veiligheid: geen (RTK-)fix -> stilstaan
-            if not curr_pos or curr_pos.get("lat", 0.0) == 0.0 or curr_pos.get("fix", 0) < 2:
+            # Positie en heading goed genoeg? Zo niet: stilstaan, of langzaam
+            # bij RTK float (instelbaar in navigation.gnss).
+            gevraagd = self.turn_speed_kmh if self.state == "TURNING" else self.target_speed_kmh
+            self.toegestaan_kmh, self.gnss_melding = self.bewaker.beoordeel(curr_pos, gevraagd)
+            if self.toegestaan_kmh <= 0.0:
                 self.vehicle.drive(0.0, 0.0)
-                self.status_message = "Wacht op GPS-fix"
-                time.sleep(0.1)
+                self.status_message = self.gnss_melding
                 continue
 
             # Lijn afleiden bij eerste goede fix (alleen als A == B)
@@ -474,9 +495,10 @@ class ABNavigator:
                 self._handle_tracking(curr_pos)
             elif self.state == "TURNING":
                 self._handle_turning(curr_pos)
-
-            elapsed = time.time() - start_time
-            time.sleep(max(0.01, interval - elapsed))
+            # Rijdt hij met beperkingen (bv. RTK float), dan staat dat erbij.
+            # Niet dubbel: na het afronden van een bocht is de melding nog die van vorige stap.
+            if self.gnss_melding and self.is_active and not self.status_message.endswith(self.gnss_melding):
+                self.status_message += f" | {self.gnss_melding}"
 
         # Stilzetten gebeurt in _navigation_loop(), ook na een fout.
 
@@ -505,12 +527,18 @@ class ABNavigator:
             self.state = "TURNING"
             return
 
-        # Carrot-punt: op de baanlijn, 'lookahead' meter vooruit.
-        carrot_along = along + sign * self.lookahead_m
-        target_bearing = self._frame_bearing(carrot_along - along, offset - cross)
-        steering = self._pure_pursuit_steer(target_bearing, curr_pos["heading"], self.lookahead_m)
+        # Rechte baan: de LijnRegelaar (Stanley of pure pursuit). Hij krijgt de
+        # lijn in de RIJRICHTING: terug (B->A) is de koers 180 graden om en
+        # ligt 'rechts' aan de andere kant.
+        lijn_koers = (self.base_bearing_deg + (0.0 if sign > 0 else 180.0)) % 360.0
+        steering = self.regelaar.stuur(
+            curr_pos["heading"], lijn_koers, sign * xte, curr_pos.get("speed_kmh", 0.0),
+            curr_pos.get("draaisnelheid_dps", 0.0), self.lookahead_m,
+            lijn_id=(self.missie_nr, self.order_index), dt=self._dt
+        )
+        target_bearing = lijn_koers
 
-        self.vehicle.drive(self.target_speed_kmh, steering)
+        self.vehicle.drive(self.toegestaan_kmh, steering)
 
         rest = sign * (uitrij_along - along)
         self.status_message = (
@@ -525,10 +553,12 @@ class ABNavigator:
                 lat=curr_pos["lat"], lon=curr_pos["lon"],
                 fix=curr_pos.get("fix", 0), hdop=curr_pos.get("hdop", 99.0),
                 heading_echt=curr_pos["heading"], heading_doel=target_bearing,
-                heading_fout=xte, stuurhoek=steering, doel_kmh=self.target_speed_kmh,
+                heading_fout=self._norm180(target_bearing - curr_pos["heading"]),
+                stuurhoek=steering, doel_kmh=self.toegestaan_kmh,
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
-                dist_wp=rest, lookahead=self.lookahead_m, dt=0.1,
-                motor=self.vehicle.log_snapshot()
+                dist_wp=rest, lookahead=self.lookahead_m, dt=self._dt,
+                motor=self.vehicle.log_snapshot(),
+                xte=xte, regelaar=self.regelaar.soort, gnss=curr_pos
             )
 
     # ------------------------------------------------------------------ #
@@ -578,8 +608,8 @@ class ABNavigator:
                 break
 
         target_bearing = self._frame_bearing(doel[0] - along, doel[1] - cross)
-        steering = self._pure_pursuit_steer(target_bearing, heading, self.turn_lookahead_m)
-        self.vehicle.drive(self.turn_speed_kmh, steering)
+        steering = self.regelaar.pure_pursuit(target_bearing, heading, self.turn_lookahead_m)
+        self.vehicle.drive(self.toegestaan_kmh, steering)
 
         self.status_message = (
             f"Kopakkerbocht naar baan {self.swath_order[self.order_index + 1]} - "
@@ -593,10 +623,11 @@ class ABNavigator:
                 lat=curr_pos["lat"], lon=curr_pos["lon"],
                 fix=curr_pos.get("fix", 0), hdop=curr_pos.get("hdop", 99.0),
                 heading_echt=heading, heading_doel=target_bearing,
-                heading_fout=rest_hoek, stuurhoek=steering, doel_kmh=self.turn_speed_kmh,
+                heading_fout=rest_hoek, stuurhoek=steering, doel_kmh=self.toegestaan_kmh,
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
-                dist_wp=beste_d, lookahead=self.turn_lookahead_m, dt=0.1,
-                motor=self.vehicle.log_snapshot()
+                dist_wp=beste_d, lookahead=self.turn_lookahead_m, dt=self._dt,
+                motor=self.vehicle.log_snapshot(),
+                xte=beste_d, regelaar="pure_pursuit", gnss=curr_pos
             )
 
     def _plan_turn(self, along):
@@ -747,14 +778,6 @@ class ABNavigator:
     def _frame_bearing(self, d_along, d_cross):
         """Kompaskoers naar een punt dat (d_along, d_cross) verderop ligt."""
         return (self.base_bearing_deg + math.degrees(math.atan2(d_cross, d_along))) % 360.0
-
-    def _pure_pursuit_steer(self, target_bearing_deg, heading_deg, lookahead_m):
-        alpha = (target_bearing_deg - heading_deg + 180.0) % 360.0 - 180.0
-        alpha_rad = math.radians(alpha)
-        delta = math.degrees(
-            math.atan2(2.0 * self.wheelbase * math.sin(alpha_rad), max(0.5, lookahead_m))
-        )
-        return max(-self.max_angle, min(self.max_angle, delta))
 
     def _along_cross(self, lat, lon):
         """Projecteer (lat,lon) op het baanframe: langs- en rechts-afstand (m)."""

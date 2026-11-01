@@ -3,10 +3,11 @@
     "os": "linux" 
   },
   "hardware": {
-    "gps_port": "/dev/ttyACM2",
-    "gps_heading_port": "/dev/ttyACM1",
-    "gps_baudrate": 115200,
-    "arduino_stepper_port": "/dev/ttyACM0",
+    "_comment_gps": "Eén ZED-X20D (simpleRTK4 Dual) op één poort levert positie, heading (THS) en snelheid. Er is geen gps_heading_port meer. Via USB maakt de baudrate niet uit; via UART moet hij gelijk zijn aan wat configure_x20d.py instelt (460800).",
+    "_comment_poorten": "Vaste namen uit /dev/serial/by-id/ in plaats van /dev/ttyACM0/1: de ACM-nummers kunnen na een herstart of opnieuw insteken van plek wisselen, deze namen niet. Op de Jetson nu: u-blox -> ttyACM0, Arduino -> ttyACM1. De Arduino-naam bevat het serienummer van DEZE Arduino; bij een andere Arduino opnieuw kijken met: ls -l /dev/serial/by-id/",
+    "gps_port": "/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00",
+    "gps_baudrate": 460800,
+    "arduino_stepper_port": "/dev/serial/by-id/usb-Arduino_UNO_R4_Minima_320B2D1839313139DD3033354B57336E-if00",
     "arduino_stepper_baudrate": 115200
   },
   "vehicle": {
@@ -95,14 +96,67 @@
     "_comment_bocht": "turn_lookahead_m staat bewust korter dan de lookahead op de lijn: met een lange lookahead snijdt pure pursuit de kopakkerboog af en komt hij scheef de nieuwe baan in. De bocht is klaar zodra de koers binnen turn_heading_tolerance_deg van de nieuwe baanrichting ligt; turn_timeout_s is het vangnet tegen eindeloos rondjes draaien.",
     "turn_lookahead_m": 1.5,
     "turn_heading_tolerance_deg": 5.0,
-    "turn_timeout_s": 90.0
+    "turn_timeout_s": 90.0,
+
+    "_comment_regelaar": "Stuurregeling op rechte stukken (AB-banen en lijnstukken tussen waypoints). 'stanley' stuurt op de koersfout en de afwijking van de vooras, en dempt met de draaisnelheid uit THS; dat kan alleen met de echte neus-heading van de dubbele antenne en trekt strak op de lijn. 'pure_pursuit' stuurt op een punt lookahead_distance_m verderop: soepeler, maar met een kleine blijvende afwijking. In de kopakkerbochten wordt altijd pure pursuit gebruikt. De regellus loopt op het ritme van de GNSS (25 Hz).",
+    "line_controller": "stanley",
+    "_comment_stanley": "gain = hoe hard een afwijking wordt teruggestuurd (1/s); te hoog = slingeren, te laag = traag terug naar de lijn. soft_speed_mps voorkomt overreactie bij lage snelheid. heading_gain weegt de koersfout. yaw_damping_s = stuurgraden tegen per graad/s draaien; verhogen als hij rond de lijn slingert.",
+    "stanley": {
+      "gain": 1.0,
+      "soft_speed_mps": 0.5,
+      "heading_gain": 1.0,
+      "yaw_damping_s": 0.05
+    },
+    "_comment_integraal": "Alleen bij stanley: werkt een vaste afwijking weg die ontstaat door een helling of een voorwiel dat net niet recht staat. integral_gain = stuurgraden per meter afwijking per seconde (0 = uit), begrensd op integral_max_deg, en hij telt alleen binnen integral_zone_m van de lijn. Begint per baan / lijnstuk opnieuw.",
+    "integral_gain": 4.0,
+    "integral_max_deg": 6.0,
+    "integral_zone_m": 0.3,
+    "_comment_ruwheid": "Langzamer op ruwe grond. Ruwheid = spreiding van de pitch (NAV-DAHEADING) over 1 seconde: op de egale baan van 1 nov 2026 mediaan 0.5, P90 0.8, max 1.7 graad. Boven start_deg gaat de snelheid lineair omlaag tot min_kmh bij vol_deg. start_deg = 0 = UIT. Om te proberen: start_deg 1.0, vol_deg 2.0.",
+    "ruwheid": {
+      "start_deg": 0.0,
+      "vol_deg": 2.0,
+      "min_kmh": 1.5
+    },
+    "_comment_gnss": "Wanneer er gereden mag worden. Per niveau 'rijden', 'langzaam' (max *_max_kmh) of 'stop'. RTK fixed rijdt altijd. rtk_float geldt ook als de RTK-correcties ouder zijn dan max_correction_age_s. dgps geldt voor alles zonder RTK (GPS, DGPS, geschat). Ouder dan max_position_age_s (25 Hz = elke 0.04 s een meting) of geen geldige heading: altijd stilstaan.",
+    "gnss": {
+      "rtk_float": "langzaam",
+      "float_max_kmh": 1.0,
+      "dgps": "stop",
+      "dgps_max_kmh": 1.0,
+      "max_position_age_s": 0.3,
+      "max_correction_age_s": 10.0
+    }
+  },
+  "gnss": {
+    "_comment_heading": "Heading komt uit NMEA-THS: de lijn van antenne GPS1 (master, achter) naar GPS2 (slave, voor). Wijst die lijn niet precies in de rijrichting, corrigeer dan met heading_offset_deg (graden, met de klok mee). THS werkt ook zonder RTK-correcties.",
+    "heading_offset_deg": 0.0,
+    "_comment_offset": "Positie van het regelpunt (midden achteras) t.o.v. antenne GPS1, in meters. Vooruit = +, rechts = +.",
+    "antenna_offset_forward_m": 0.0,
+    "antenna_offset_right_m": 0.0,
+    "_comment_timeout": "Na heading_timeout_s zonder geldige THS valt de koers terug op VTG (alleen boven vtg_fallback_min_kmh, en alleen vooruit rijdend betrouwbaar); anders staat de robot stil met 'Wacht op GNSS-heading'.",
+    "heading_timeout_s": 1.0,
+    "vtg_fallback_min_kmh": 1.5,
+    "accept_estimated_heading": true,
+    "_comment_latentie": "Latentie-compensatie: positie en koers worden vooruit geschoven over de leeftijd van de meting plus latency_s (rekentijd ontvanger + USB), met de snelheid en de draaisnelheid. Bij 3 km/h is 50 ms al 4 cm.",
+    "latency_compensation": true,
+    "latency_s": 0.03,
+    "_comment_daheading": "Meet en logt UBX-NAV-DAHEADING: afstand en hoogteverschil tussen de antennes, pitch, heading-nauwkeurigheid en fixed/float. Wordt bij het opstarten aangezet in het RAM van het board (na een herstart van het board weer uit). Alleen informatie; gestuurd wordt op THS.",
+    "daheading": true,
+    "_comment_antennehoogte": "Hoogte van antenne GPS1 boven de grond (m). Kantelt de robot voor-achter, dan staat de antenne niet meer recht boven zijn voetpunt: positie (en dus kopakker en onkruidposities) wordt gecorrigeerd met hoogte x sin(pitch) uit NAV-DAHEADING, bij 1 m en 5 graden 9 cm. Ook de hoogte van de grond in de terreinlog gebruikt dit. 0 = geen correctie: METEN EN INVULLEN.",
+    "antenna_height_m": 0.0,
+    "_comment_pitch_offset": "Scheefstand van de antennemontage (graden, + = voorste antenne GPS2 hoger). Die meet de dubbele antenne als pitch terwijl de robot vlak staat, dus hij gaat er af. 1.3 is gemeten uit de ritten van 1 nov 2026 (heen 1.3-2.2, terug 0.8-1.1 graad: gemiddelde = montage, de helft van het verschil = het veld). Opnieuw bepalen na verplaatsen van de antennes: terrein_kaart.py drukt de schatting af.",
+    "pitch_offset_deg": 1.3,
+    "_comment_terrein": "Terreinlog voor de veldkaarten (Single_script_code/terrein_kaart.py): elke terrain_log_step_m meter een punt met hoogte, helling (pitch) en ruwheid, alleen met RTK fixed, ook bij handmatig rijden. Eén bestand per dag in data/terrein/.",
+    "terrain_log": true,
+    "terrain_log_step_m": 0.25
   },
   "ntrip": {
     "host": "caster.centipede.fr",
     "port": 2101,
     "mountpoint": "NEAR",
     "user": "centipede",
-    "pass": "centipede"
+    "pass": "centipede",
+    "gga_interval_s": 10.0
   },
   "vision": {
     "camera_type": "gx",
@@ -145,6 +199,9 @@
       "track_verlopen_s": 1.0
     },
     "zones_aantal": 6,
-    "zone_offsets_meters": [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5] 
+    "zone_offsets_meters": [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5],
+    "_comment_camera_positie": "Waar het midden van het camerabeeld op de grond ligt, gemeten vanaf het punt recht onder antenne GPS1 (achter): vooruit = +, rechts = +, in meters. De zone_offsets_meters komen daar zijwaarts bij. Zo krijgt elke onkruidplant zijn eigen positie, gecorrigeerd voor koers, latentie en pitch. 0 / 0 = de positie van de antenne (zoals vroeger).",
+    "camera_offset_forward_m": 0.0,
+    "camera_offset_right_m": 0.0
   }
 }

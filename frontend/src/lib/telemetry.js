@@ -63,6 +63,8 @@ export function fmt(waarde, decimalen = 1) {
 export function fixInfo(fix) {
     if (fix === 4) return { tekst: 'RTK Fixed', kleur: 'groen' };
     if (fix === 5) return { tekst: 'RTK Float', kleur: 'oranje' };
-    if (fix === 1 || fix === 2) return { tekst: 'Standaard GPS', kleur: 'oranje' };
+    if (fix === 2) return { tekst: 'DGPS', kleur: 'oranje' };
+    if (fix === 1) return { tekst: 'Standaard GPS', kleur: 'oranje' };
+    if (fix === 6) return { tekst: 'Geschat', kleur: 'rood' };
     return { tekst: 'Geen fix', kleur: 'rood' };
 }

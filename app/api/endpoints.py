@@ -120,6 +120,7 @@ def bewaar_waypoints(data):
 def get_status():
     pos = gps_system.get_current_position()
     pos.update({
+        "gnss": gps_system.get_diagnostics(),
         "navigator_active": navigator.is_active,
         "nav_state": navigator.state,
         "nav_message": navigator.status_message,
