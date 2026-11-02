@@ -79,3 +79,6 @@ test/test_video.mp4
 .idea/ 
 *.sublime-project 
 *.sublime-workspace
+# --- Ritlogs bevatten echte GPS-posities; nooit committen (ook niet als kopie ergens anders)
+rit_*.csv
+*_extracted_data.*

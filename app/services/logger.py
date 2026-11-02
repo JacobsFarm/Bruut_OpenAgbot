@@ -16,7 +16,11 @@ GNSS_KOLOMMEN = [
     ("DAH_AccHeading", "dah_acc_heading"), ("DAH_Oplossing", "dah_oplossing"),
     ("DAH_Leeftijd_s", "dah_leeftijd_s"),
     ("Pitch_Correctie_m", "pitch_correctie_m"), ("Hoogte_Grond_m", "hoogte_grond_m"),
+    # Ruwe GGA-hoogte van de antenne zelf (Hoogte_Grond_m = deze min antenna_height_m x cos(pitch)).
+    ("Hoogte_Antenne_m", "alt_m"),
     ("Ruwheid_deg", "ruwheid_deg"),
+    # Grond onder de antenne: bij deze positie hoort Hoogte_Grond_m (Lat/Lon is het regelpunt).
+    ("Grond_Lat", "grond_lat"), ("Grond_Lon", "grond_lon"),
 ]
 
 class DriveLogger:

@@ -12,8 +12,8 @@ DATA_FOLDER = os.path.join(".", "data")  # Directory containing .json and .jpg f
 OUTPUT_FILE = "detection_map.html"       # Output filename
 
 # Fallback Map Settings (used if no detections are found)
-FALLBACK_LAT = 52.2128                 
-FALLBACK_LON = 4.5914                  
+FALLBACK_LAT = 52.0                    # neutrale plek; wordt overschreven door de eerste detectie
+FALLBACK_LON = 4.0
 MAP_START_ZOOM = 18                      
 MAP_MAX_ZOOM = 21                        
 # ==========================================

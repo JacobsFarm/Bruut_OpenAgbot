@@ -1,9 +1,8 @@
 """
-Veldkaarten uit de terreinlog van de AgBot: hoogte, helling en ruwheid.
+Veldkaarten uit de ritlog van de AgBot: hoogte, helling en ruwheid.
 
-Leest data/terrein/terrein_*.csv (die de app tijdens het rijden schrijft,
-ook bij handmatig rijden). Ritlogs (data/logs/rit_*.csv) kunnen ook: daar
-staan pitch en, in nieuwere ritten, de hoogte van de grond in.
+Leest data/logs/rit_*.csv (de ritlog met Hoogte_Grond_m, Grond_Lat/Grond_Lon, Pitch_deg en
+Ruwheid_deg). Oude terreinlogs (data/terrein/terrein_*.csv) kun je nog opgeven.
 
 Maakt per run:
   <naam>_terrein.html  interactieve kaart op de luchtfoto: de ingekleurde
@@ -24,26 +23,28 @@ De HELLING op de kaart komt op twee manieren:
     beter naarmate er meer banen naast elkaar gereden zijn.
 
 De hoogte komt alleen uit de RTK-hoogte (GGA, gecorrigeerd voor de
-antennehoogte). Oudere ritlogs hebben die niet: dan alleen helling en
-ruwheid. (Hoogte terugrekenen uit de pitch loopt over honderden meters
-meters weg en is daarom bewust niet gedaan.)
+antennehoogte). Oudere ritlogs hebben die niet: dan rekent hij een RELATIEVE
+hoogte terug uit de pitch (hoogte_uit_pitch), met de aansluiting tussen
+naast elkaar liggende banen als ijking, en zet er overal 'geschat' bij. Dat
+vraagt een rit met heen-en-terug banen en geeft geen hoogte boven zeeniveau.
 
 Daarnaast schat hij de scheefstand van de antennemontage: rijd heen en
 terug, dan keert een helling om en blijft de montage gelijk. Zet die
 waarde bij gnss.pitch_offset_deg in de config (staat hij goed: ~0).
 
 Gebruik (vanuit de hoofdmap van het project):
-    python Single_script_code/terrein_kaart.py                  # alle terreinlogs
-    python Single_script_code/terrein_kaart.py data/terrein/terrein_20261101.csv
-    python Single_script_code/terrein_kaart.py data/logs/rit_AB_Missie_20261101_*.csv
+    python Single_script_code/extract_map_terrain.py             # nieuwste rit
+        python Single_script_code/extract_map_terrain.py data/logs/rit_AB_Missie_20261101_*.csv
 """
 import csv
 import glob
 import math
 import os
+import re
 import sys
 
 R = 6371000.0
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 def getal(x):
@@ -55,7 +56,7 @@ def getal(x):
 
 
 def lees(pad):
-    """Geeft een lijst punten {lat, lon, hoogte, pitch, ruwheid} uit een terreinlog of ritlog."""
+    """Geeft een lijst punten {lat, lon, hoogte, pitch, ruwheid} uit een ritlog (of een oude terreinlog)."""
     with open(pad, encoding="utf-8", errors="ignore") as f:
         rijen = list(csv.DictReader(f))
     if not rijen:
@@ -66,7 +67,9 @@ def lees(pad):
         if ritlog:
             if r.get("Fix") != "4":
                 continue
-            p = {"lat": getal(r.get("Lat")), "lon": getal(r.get("Lon")),
+            # Hoogte_Grond_m hoort bij de grond onder de antenne (Grond_Lat/Lon), niet bij het regelpunt.
+            p = {"lat": getal(r.get("Grond_Lat")) or getal(r.get("Lat")),
+                 "lon": getal(r.get("Grond_Lon")) or getal(r.get("Lon")),
                  "hoogte": getal(r.get("Hoogte_Grond_m")), "pitch": getal(r.get("Pitch_deg")),
                  "ruwheid": getal(r.get("Ruwheid_deg")), "kmh": getal(r.get("Echt_kmh")),
                  "heading": getal(r.get("Heading_Echt"))}
@@ -87,7 +90,7 @@ def xy(lat, lon, lat0, lon0):
 
 
 def dun_uit(punten, stap):
-    """Ritlogs hebben 25 regels per seconde: houd er een per 'stap' meter over (zoals de terreinlog)."""
+    """Ritlogs hebben 25 regels per seconde: houd er een per 'stap' meter over (zo'n 4 punten per meter)."""
     uit, vorige = [], None
     for p in punten:
         if vorige is None or math.hypot(*xy(p["lat"], p["lon"], vorige["lat"], vorige["lon"])) >= stap:
@@ -136,6 +139,84 @@ def vul_aan(punten):
                 p["ruwheid"] = math.sqrt(sum((v - g) ** 2 for v in venster) / len(venster))
 
 
+HOOGTE_GESCHAT = False      # True als de hoogte uit de pitch is teruggerekend (dan overal 'geschat' in de titels)
+
+
+def hoogte_uit_pitch(punten, buur_m=5.0, ridge=1000.0, max_paren=20000):
+    """
+    Relatieve hoogte uit de pitch, voor ritlogs zonder RTK-hoogte (Hoogte_Grond_m).
+
+    Per meter rijden is de hoogtewinst tan(pitch). Optellen langs de route
+    loopt echter weg zodra de pitch een kleine vaste fout heeft (1 graad op
+    100 m is 1,7 m). Daarom krijgt elk rechtstuk (koers binnen 30 graden) een
+    eigen onbekende restfout, en wordt die zo gekozen dat naast elkaar
+    liggende banen (binnen buur_m, iets meer dan de baanafstand) dezelfde hoogte krijgen. Heen en terug
+    over dezelfde strook levert dus de ijking. De restfouten worden STERK naar
+    een gemeenschappelijke waarde getrokken (ridge): de montagefout is in
+    werkelijkheid een vaste waarde. Laat je elk stuk vrij (ridge ~ 3), dan is een
+    vlak veld altijd een geldige oplossing en verdwijnt de helling in de
+    rijrichting. Vanaf ridge ~ 300 is de uitkomst stabiel.
+
+    Resultaat: p["hoogte"] in meter RELATIEF (nul = gemiddelde van het veld),
+    geen hoogte boven zeeniveau. De helling in de rijrichting is goed; de
+    helling dwars daarop wordt alleen via de aansluiting tussen de banen
+    bepaald en is minder zeker. Zet HOOGTE_GESCHAT op True.
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+    pp = [p for p in punten if p["pitch"] is not None]
+    if len(pp) < 200:
+        return False
+    lat0 = sum(p["lat"] for p in pp) / len(pp)
+    lon0 = sum(p["lon"] for p in pp) / len(pp)
+    xy_ = np.array([xy(p["lat"], p["lon"], lat0, lon0) for p in pp])
+    ds = np.r_[0.0, np.hypot(*np.diff(xy_, axis=0).T)]
+    sprongen = int((ds > 2.0).sum())
+    ds[ds > 2.0] = 0.0                       # gat in de log: niet meetellen
+    s = np.cumsum(ds)
+    seg = np.zeros(len(pp), dtype=int)
+    k, ref = 0, pp[0]["heading"]
+    for i, p in enumerate(pp):
+        h = p["heading"]
+        if h is not None and ref is not None and abs((h - ref + 180.0) % 360.0 - 180.0) > 30.0:
+            k, ref = k + 1, h
+        seg[i] = k
+    nseg = k + 1
+    G = np.cumsum(ds * np.tan(np.radians([p["pitch"] for p in pp])))
+    een = np.zeros((len(pp), nseg))
+    een[np.arange(len(pp)), seg] = ds
+    A = np.cumsum(een, axis=0)               # meter gereden per rechtstuk tot elk punt
+
+    paren = cKDTree(xy_).query_pairs(buur_m, output_type="ndarray")
+    if len(paren) == 0:
+        return False
+    i, j = paren.T
+    ok = (np.abs(seg[i] - seg[j]) >= 2) & (np.abs(s[i] - s[j]) > 10.0)
+    i, j = i[ok], j[ok]
+    if len(i) < 50:
+        print("  Hoogte uit pitch niet mogelijk: te weinig banen die naast elkaar liggen.")
+        return False
+    if len(i) > max_paren:
+        kies = np.random.default_rng(0).choice(len(i), max_paren, replace=False)
+        i, j = i[kies], j[kies]
+    M = np.zeros((len(i) + nseg, nseg + 1))
+    v = np.zeros(len(i) + nseg)
+    M[:len(i), :nseg] = A[i] - A[j]
+    v[:len(i)] = G[i] - G[j]
+    for r in range(nseg):                    # restfout van elk stuk ~ gemeenschappelijke waarde
+        M[len(i) + r, r], M[len(i) + r, nseg] = ridge, -ridge
+    b = np.linalg.lstsq(M, v, rcond=None)[0]
+    rest = M[:len(i)] @ b - v[:len(i)]
+    h = G - A @ b[:nseg]
+    h -= h.mean()
+    for p, hh in zip(pp, h):
+        p["hoogte"] = float(hh)
+    print(f"  Hoogte GESCHAT uit de pitch (relatief, nul = gemiddelde): {len(i)} buurparen van banen sluiten op "
+          f"gemiddeld {np.sqrt(np.mean(rest ** 2)) * 100:.1f} cm na aan; gemeenschappelijke pitchfout "
+          f"{math.degrees(b[nseg]):+.2f} graad." + (f" ({sprongen} gat(en) in de log overgeslagen)" if sprongen else ""))
+    return True
+
+
 def kwantiel(v, q):
     v = sorted(x for x in v if x is not None)
     return v[min(len(v) - 1, int(q * len(v)))] if v else None
@@ -150,7 +231,7 @@ def samenvatting(punten):
     ruw = [p["ruwheid"] for p in punten if p["ruwheid"] is not None]
     print(f"  {len(punten)} punten, gebied ca. {max(xs) - min(xs):.0f} x {max(ys) - min(ys):.0f} m")
     if hoogte:
-        print(f"  hoogte van de grond: {min(hoogte):.2f} .. {max(hoogte):.2f} m "
+        print(f"  hoogte van de grond{' (geschat, relatief)' if HOOGTE_GESCHAT else ''}: {min(hoogte):.2f} .. {max(hoogte):.2f} m "
               f"(verschil {max(hoogte) - min(hoogte):.2f} m)")
     if pitch:
         print(f"  helling in rijrichting |pitch|: mediaan {kwantiel(pitch, .5):.1f}, P90 {kwantiel(pitch, .9):.1f}, "
@@ -161,7 +242,8 @@ def samenvatting(punten):
 
 
 TEGEL_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-TEGEL_CACHE = os.path.join("data", "kaarttegels")
+STRAAT_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+TEGEL_CACHE = os.path.join(PROJECT_ROOT, "data", "kaarttegels")
 
 
 def _tegel_xy(lat, lon, z):
@@ -241,7 +323,17 @@ def bereken_raster(punten, lat0, lon0, cel=0.5):
     raster = griddata((x, y), h, (gx, gy), method="linear")
     afstand, _ = cKDTree(np.c_[x, y]).query(np.c_[gx.ravel(), gy.ravel()])
     raster[afstand.reshape(gx.shape) > 2.0] = np.nan
-    dy, dx = np.gradient(raster, cel)
+    gladde = raster
+    if HOOGTE_GESCHAT:
+        # Teruggerekende hoogte heeft een paar cm sprong tussen banen van ~4 m; zonder
+        # uitsmeren leest de gradient dat als dwarshelling van enkele procenten.
+        from scipy.ndimage import gaussian_filter
+        geldig = np.isfinite(raster)
+        sigma = 4.0 / cel
+        teller = gaussian_filter(np.where(geldig, raster, 0.0), sigma)
+        noemer = gaussian_filter(geldig.astype(float), sigma)
+        gladde = np.where(geldig, teller / np.maximum(noemer, 1e-6), np.nan)
+    dy, dx = np.gradient(gladde, cel)
     helling = np.hypot(dx, dy) * 100.0
     return {"gx": gx, "gy": gy, "hoogte": raster, "helling": helling}
 
@@ -258,13 +350,15 @@ def html_kaart(punten, lat0, lon0, rast, uit_pad):
     m = folium.Map(location=[lat0, lon0], zoom_start=19, max_zoom=22, tiles=None)
     folium.TileLayer(tiles=TEGEL_URL, attr="Esri World Imagery", name="Satelliet",
                      max_zoom=22, max_native_zoom=19).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="Kaart", max_zoom=22, max_native_zoom=19).add_to(m)
+    # Niet OpenStreetMap: de OSM-servers blokkeren aanvragen van scripts (403).
+    folium.TileLayer(tiles=STRAAT_URL, attr="Esri World Street Map", name="Kaart",
+                     max_zoom=22, max_native_zoom=19, show=False).add_to(m)
 
     # Ingekleurd raster (hoogte en echte helling) over de luchtfoto heen.
     if rast is not None:
         lat_z, lon_w = _meters_naar_latlon(rast["gx"].min(), rast["gy"].min(), lat0, lon0)
         lat_n, lon_o = _meters_naar_latlon(rast["gx"].max(), rast["gy"].max(), lat0, lon0)
-        for naam, veld, kaart, zichtbaar in (("Hoogtekaart", "hoogte", "terrain", True),
+        for naam, veld, kaart, zichtbaar in ((("Hoogtekaart (geschat uit pitch)" if HOOGTE_GESCHAT else "Hoogtekaart"), "hoogte", "terrain", True),
                                              ("Hellingkaart (%)", "helling", "RdYlGn_r", False)):
             v = rast[veld]
             lo, hi = np.nanpercentile(v, 2), np.nanpercentile(v, 98)
@@ -295,7 +389,7 @@ def html_kaart(punten, lat0, lon0, rast, uit_pad):
         schaal.add_to(m)
 
     heeft_hoogte = any(p["hoogte"] is not None for p in punten)
-    laag("Hoogte (punten)", "hoogte", ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"],
+    laag("Hoogte geschat (punten)" if HOOGTE_GESCHAT else "Hoogte (punten)", "hoogte", ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"],
          eenheid="m", zichtbaar=rast is None and heeft_hoogte)
     laag("Helling rijrichting", "pitch", ["#1a9641", "#ffffbf", "#d7191c"], absoluut=True,
          eenheid="graad", zichtbaar=not heeft_hoogte)
@@ -362,13 +456,14 @@ def png_kaart(punten, lat0, lon0, rast, titel, uit_pad):
         lijnen = ax.contour(rast["gx"], rast["gy"], rast["hoogte"], levels=10, colors="k", linewidths=0.6, zorder=2)
         ax.clabel(lijnen, fmt="%.2f", fontsize=7)
         fig.colorbar(vlak, ax=ax, label="hoogte (m)", shrink=0.9)
-        ax.set_title("Hoogte van de grond (RTK) met hoogtelijnen")
+        ax.set_title(("Hoogte, GESCHAT uit de pitch (relatief, 0 = gemiddelde) met hoogtelijnen" if HOOGTE_GESCHAT
+                      else "Hoogte van de grond (RTK) met hoogtelijnen"))
     elif any(p["hoogte"] is not None for p in punten):
         punten_laag(ax, "hoogte", "terrain", "hoogte (m)")
-        ax.set_title("Hoogte van de grond (RTK)")
+        ax.set_title("Hoogte, GESCHAT uit de pitch (relatief)" if HOOGTE_GESCHAT else "Hoogte van de grond (RTK)")
     else:
         ax.plot(alle_x, alle_y, "w.", ms=1, alpha=0.6, zorder=2)
-        ax.set_title("Hoogte: niet in deze log (wel in de terreinlog en nieuwere ritlogs) - wit = gereden pad")
+        ax.set_title("Hoogte: niet in deze log (wel in nieuwere ritlogs) - wit = gereden pad")
 
     # 2. Helling: echte helling uit de hoogtekaart, anders de pitch in de rijrichting.
     ax = assen[1]
@@ -377,7 +472,7 @@ def png_kaart(punten, lat0, lon0, rast, titel, uit_pad):
         vlak = ax.contourf(rast["gx"], rast["gy"], np.clip(hh, 0, np.nanpercentile(hh, 98)),
                            levels=15, cmap="RdYlGn_r", alpha=0.6, zorder=1)
         fig.colorbar(vlak, ax=ax, label="helling (%)", shrink=0.9)
-        ax.set_title("Helling uit de hoogtekaart (steilste richting)")
+        ax.set_title("Helling uit de hoogtekaart (steilste richting)" + (", uitgesmeerd over ~4 m" if HOOGTE_GESCHAT else ""))
     else:
         punten_laag(ax, "pitch", "RdYlGn_r", "|pitch| (graad)", absoluut=True)
         ax.set_title("Helling in de rijrichting (pitch)")
@@ -393,10 +488,17 @@ def png_kaart(punten, lat0, lon0, rast, titel, uit_pad):
 
 
 def main():
-    paden = sys.argv[1:] or sorted(glob.glob(os.path.join("data", "terrein", "terrein_*.csv")))
+    paden = sys.argv[1:]
+    if not paden:
+        # Zonder argumenten: de nieuwste ritlog.
+        ritten = sorted(glob.glob(os.path.join(PROJECT_ROOT, "data", "logs", "rit_*.csv")),
+                        key=lambda f: (re.search(r"\d{8}_\d{6}", f) or [""])[0])
+        paden = ritten[-1:]
+        if paden:
+            print(f"Nieuwste ritlog: {os.path.basename(paden[0])}")
     paden = [p for g in paden for p in (sorted(glob.glob(g)) or [g])]
     if not paden:
-        print("Geen terreinlogs gevonden in data/terrein/. Rij eerst met de app (terrain_log = true).")
+        print("Geen ritlogs gevonden in data/logs/. Rij eerst een missie met de app.")
         return
     punten = []
     for pad in paden:
@@ -407,6 +509,9 @@ def main():
         print("Te weinig punten met RTK fixed voor een kaart.")
         return
     vul_aan(punten)
+    global HOOGTE_GESCHAT
+    if not any(p["hoogte"] is not None for p in punten) and len(paden) == 1:
+        HOOGTE_GESCHAT = hoogte_uit_pitch(punten)
     naam = os.path.splitext(paden[0])[0] if len(paden) == 1 else os.path.join(os.path.dirname(paden[0]), "samen")
     print("\nSamenvatting:")
     lat0, lon0 = samenvatting(punten)

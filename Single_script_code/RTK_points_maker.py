@@ -157,7 +157,7 @@ def genereer_html_veldkaart(waypoints, output_pad):
         name='Satelliet Weergave',
         max_zoom=22
     ).add_to(m)
-    folium.TileLayer('OpenStreetMap', name='Wegenkaart').add_to(m)
+    folium.TileLayer(tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", attr="Esri World Street Map", name='Wegenkaart', max_zoom=22, show=False).add_to(m)
 
     # Teken de route
     coords = list(zip(lats, lons))

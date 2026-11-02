@@ -192,6 +192,9 @@ def read_rows(csv_path):
                     "afstand": float(raw["Afstand_tot_WP_m"]),
                     "lookahead": float(raw["Lookahead_m"]),
                     "loop_t": float(raw["Loop_Tijd_s"]),
+                    # Nieuwere ritten: de echte lijnafwijking (m, met teken) staat in
+                    # Afwijking_m; Heading_Fout is dan bij stanley een koersfout in graden.
+                    "xte": optional_float(raw, "Afwijking_m"),
                 })
             except (ValueError, KeyError, TypeError):
                 continue
@@ -221,6 +224,18 @@ def duur_s(rows):
     return sum(r["loop_t"] for r in rows)
 
 
+def xte_waarde(r):
+    """Lijnafwijking in meter: Afwijking_m (nieuwe ritten), anders Heading_Fout (oude ritten)."""
+    return r["xte"] if r["xte"] is not None else r["h_fout"]
+
+
+def gem_heading(rows):
+    """Gemiddelde koers (graden) van een reeks regels, cirkelgemiddelde."""
+    sx = sum(math.sin(math.radians(r["h_echt"])) for r in rows)
+    cx = sum(math.cos(math.radians(r["h_echt"])) for r in rows)
+    return math.degrees(math.atan2(sx, cx)) % 360
+
+
 def analyseer_baan(seg, settle_window=20):
     """
     Cijfers voor een enkele baan.
@@ -235,7 +250,7 @@ def analyseer_baan(seg, settle_window=20):
     'Uitslag' is de grootste afwijking tijdens dat oppakken: schiet hij door
     naar de andere kant van de lijn, dan zie je dat hier.
     """
-    xte = [abs(r["h_fout"]) for r in seg["rows"]]
+    xte = [abs(xte_waarde(r)) for r in seg["rows"]]
 
     settle_i = None
     for i in range(len(xte)):
@@ -258,7 +273,8 @@ def analyseer_baan(seg, settle_window=20):
         "max": max(na) if na else 0.0,
         "xte_na": na,
         "xte_alles": xte,
-        "signed_na": [r["h_fout"] for r in seg["rows"][settle_i:]] if settle_i is not None else [],
+        "signed_na": [xte_waarde(r) for r in seg["rows"][settle_i:]] if settle_i is not None else [],
+        "heading": gem_heading(seg["rows"]),
     }
 
 
@@ -459,11 +475,25 @@ def generate_report(csv_path, report_path, cfg):
         xte_na = [v for b in banen for v in b["xte_na"]]
         xte_alles = [v for b in banen for v in b["xte_alles"]]
         signed_na = [v for b in banen for v in b["signed_na"]]
+        nieuw_formaat = any(r["xte"] is not None for r in rows)
         links = sum(1 for v in signed_na if v < 0)
         rechts = sum(1 for v in signed_na if v > 0)
         bias = ("RECHTS van de lijn" if rechts > links * 1.2 else
                 "LINKS van de lijn" if links > rechts * 1.2 else
                 "Geen duidelijke bias")
+        # Afwijking_m heeft een vast teken ten opzichte van de AB-lijn, niet ten opzichte
+        # van de rijrichting. Daarom per rijrichting kijken: zelfde teken in beide
+        # richtingen = de lijn ligt ernaast, tegengesteld teken = vaste zijwaartse fout in de robot.
+        richting_txt = None
+        if nieuw_formaat:
+            ref = banen[0]["heading"]
+            per_richting = ([], [])
+            for b in banen:
+                per_richting[0 if abs(angle_difference(ref, b["heading"])) < 90 else 1].extend(b["signed_na"])
+            delen = [f"richting {naam} ({gem:.0f}°) {avg(v):+.3f} m"
+                     for naam, v, gem in (("A", per_richting[0], ref),
+                                          ("B", per_richting[1], (ref + 180) % 360)) if v]
+            richting_txt = " / ".join(delen)
         onrustig = sum(1 for v in xte_na if v > XTE_INSTABILITY_M)
 
         lines.append("[LIJNVOLGING (cross-track error)]")
@@ -473,7 +503,12 @@ def generate_report(csv_path, report_path, cfg):
         lines.append(f"- XTE maximum       : {max(xte_na) if xte_na else 0:.3f} m")
         lines.append(f"- XTE P90           : {percentile(xte_na, 90):.3f} m")
         lines.append(f"- XTE P95           : {percentile(xte_na, 95):.3f} m")
-        lines.append(f"- XTE bias          : {bias}  (links {links}x / rechts {rechts}x)")
+        if richting_txt:
+            lines.append(f"- XTE gemiddeld/richt: {richting_txt}")
+            lines.append("  Zelfde teken in beide richtingen: de lijn ligt ernaast. Tegengesteld teken: een")
+            lines.append("  vaste zijwaartse fout in de robot (antenne-offset rechts, koersoffset).")
+        else:
+            lines.append(f"- XTE bias          : {bias}  (links {links}x / rechts {rechts}x)")
         lines.append(f"- Instabiliteit     : {(onrustig / max(len(xte_na), 1)) * 100:.1f} % "
                      f"(XTE > {XTE_INSTABILITY_M} m)")
         lines.append(f"- Incl. aanrijden   : gem {avg(xte_alles):.3f} m, "
@@ -658,6 +693,236 @@ def generate_report(csv_path, report_path, cfg):
         print(f"💾 Opgeslagen als: '{os.path.basename(report_path)}'\n")
     except Exception as e:
         print(f"❌ Fout bij opslaan rapport: {e}")
+
+    html_path = os.path.splitext(report_path)[0] + ".html"
+    try:
+        schrijf_html(file_short, report_text, banen, bochten, rows, cfg, html_path)
+        print(f"🌐 HTML-rapport     : '{os.path.basename(html_path)}'\n")
+    except Exception as e:
+        print(f"❌ Fout bij maken HTML-rapport: {e}")
+
+
+# ==========================================
+# HTML-RAPPORT
+# ==========================================
+HTML_CSS = """
+:root{--bg:#f6f7f4;--kaart:#fff;--tekst:#1c2321;--zacht:#5b6763;--lijn:#dde2de;--goed:#2d7a46;--let:#b4531f;--info:#2f5d8a}
+@media(prefers-color-scheme:dark){:root{--bg:#14181a;--kaart:#1d2326;--tekst:#e6ebe8;--zacht:#9aa6a1;--lijn:#2d3639;--goed:#5fbf82;--let:#e8905a;--info:#78a9d8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tekst);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.5rem;margin:0 0 2px} h2{font-size:1.1rem;margin:0 0 4px}
+.sub{color:var(--zacht);margin-bottom:18px;word-break:break-all}
+.kaarten{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:18px}
+.kaart{background:var(--kaart);border:1px solid var(--lijn);border-radius:10px;padding:12px 14px}
+.kaart .k{color:var(--zacht);font-size:.8rem} .kaart .g{font-size:1.3rem;font-weight:650;margin:2px 0;overflow-wrap:anywhere}
+section{background:var(--kaart);border:1px solid var(--lijn);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+section .intro{color:var(--zacht);font-size:.85rem;margin:0 0 8px}
+.tw{overflow-x:auto;margin:8px 0}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--lijn)}
+th:first-child,td:first-child{text-align:left} th{font-size:.78rem;color:var(--zacht);font-weight:600}
+tr:last-child td{border-bottom:0}
+table.kv td:first-child{color:var(--zacht);white-space:nowrap;width:1%;padding-right:20px}
+table.kv td:last-child{text-align:left;white-space:normal}
+tr.sub td:first-child{padding-left:28px}
+tr.warn td{background:rgba(180,83,31,.12)} tr.warn td:first-child{color:var(--let);font-weight:600}
+td.noot{text-align:left;color:var(--zacht);font-size:.82rem;white-space:normal}
+.aandacht{list-style:none;padding:0;margin:0}
+.aandacht li{border-left:4px solid var(--let);background:rgba(180,83,31,.08);border-radius:6px;padding:8px 12px;margin-bottom:6px}
+.goed{border-left:4px solid var(--goed);background:rgba(45,122,70,.08);border-radius:6px;padding:8px 12px}
+img{width:100%;height:auto;border-radius:8px;border:1px solid var(--lijn);background:#fff}
+@media print{body{background:#fff;color:#000}section,.kaart{break-inside:avoid}main{padding:0}}
+"""
+
+HTML_KPI = [
+    ("RIT OVERZICHT", "Rijtijd", "Rijtijd"),
+    ("RIT OVERZICHT", "Afstand gereden", "Afstand"),
+    ("LIJNVOLGING (cross-track error)", "XTE gemiddeld", "Afwijking van de lijn, gem."),
+    ("LIJNVOLGING (cross-track error)", "XTE P95", "Afwijking van de lijn, P95"),
+    ("KOERS & ORIENTATIE", "Koers-bias", "Koers-bias"),
+    ("SNELHEID & EFFICIENTIE", "Tijdens de baan", "Snelheid op de baan"),
+    ("ACCU & WIELEN", "Lading (schatting)", "Lading"),
+    ("ACCU & WIELEN", "Vermogen", "Vermogen"),
+    ("ACCU & WIELEN", "Energie deze rit", "Energie"),
+    ("GPS & SYSTEEM", "RTK Fixed (4)", "RTK fixed"),
+]
+
+
+def parse_rapport(tekst):
+    """Het tekstrapport terug in secties: titel, uitleg en regels (kv / sub / note)."""
+    import re
+    secties, huidig = [], None
+    for ln in tekst.split("\n"):
+        s = ln.rstrip()
+        if not s.strip() or s.startswith("====") or "TELEMETRY ANALYSE" in s or s.startswith("Analyseer dit"):
+            continue
+        m = re.match(r"^\[([^\]]+)\]\s*(?:\((.*)\))?\s*$", s)
+        if m:
+            huidig = {"titel": m.group(1), "sub": m.group(2) or "", "regels": []}
+            secties.append(huidig)
+            continue
+        if huidig is None:
+            continue
+        if huidig["titel"] in ("PER BAAN", "PER KOPAKKERBOCHT") and (re.match(r"^\s+nr\s", s) or re.match(r"^\s+\d+\s{2}", s)):
+            continue                                   # tabel: komt uit de data zelf
+        m = re.match(r"^- ([^:]+?)\s*:\s(.*)$", s)
+        if m:
+            huidig["regels"].append(("kv", m.group(1).strip(), m.group(2).strip()))
+            continue
+        m = re.match(r"^\s+- ([^:]+?)\s*:\s(.*)$", s)
+        if m:
+            huidig["regels"].append(("sub", m.group(1).strip(), m.group(2).strip()))
+            continue
+        huidig["regels"].append(("note", s.strip(), ""))
+    return secties
+
+
+def maak_grafiek(rows, max_center):
+    """XTE, snelheid en stuurhoek over de rit, met de kopakkerbochten grijs; als base64-PNG."""
+    import base64
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    if all(r["t"] for r in rows):
+        t0 = rows[0]["t"]
+        t = [((r["t"] - t0).total_seconds() + 86400) % 86400 for r in rows]
+    else:
+        t, acc = [], 0.0
+        for r in rows:
+            acc += r["loop_t"]
+            t.append(acc)
+    nan = float("nan")
+    xte = [xte_waarde(r) if r["modus"] == "TRACKING" else nan for r in rows]
+    fig, ax = plt.subplots(3, 1, figsize=(13, 8), sharex=True, constrained_layout=True)
+    ax[0].plot(t, xte, lw=0.7, color="#1f77b4")
+    ax[0].axhline(0, color="k", lw=0.5)
+    ax[0].set_ylim(-0.3, 0.3)
+    ax[0].set_ylabel("afwijking van de lijn (m)")
+    ax[0].set_title("Lijnvolging (alleen op de baan; as afgekapt op \u00b130 cm)")
+    ax[1].plot(t, [r["doel_kmh"] for r in rows], lw=0.8, color="grey", label="doel")
+    ax[1].plot(t, [r["echt_kmh"] for r in rows], lw=0.7, color="#d62728", label="echt (GNSS)")
+    ax[1].set_ylabel("km/h")
+    ax[1].legend(loc="upper right", ncol=2)
+    ax[1].set_title("Snelheid")
+    ax[2].plot(t, [r["stuur"] for r in rows], lw=0.7, color="#2ca02c")
+    for v in (max_center, -max_center):
+        ax[2].axhline(v, color="red", lw=0.7, ls=":")
+    ax[2].set_ylabel("stuurhoek (graden)")
+    ax[2].set_xlabel("tijd in de rit (s)")
+    ax[2].set_title(f"Stuurhoek (rode lijn = limiet middenhoek {max_center:.1f}\u00b0)")
+    i = 0
+    while i < len(rows):
+        if rows[i]["modus"] == "TURNING":
+            j = i
+            while j + 1 < len(rows) and rows[j + 1]["modus"] == "TURNING":
+                j += 1
+            for a in ax:
+                a.axvspan(t[i], t[j], color="grey", alpha=0.18, lw=0)
+            i = j + 1
+        else:
+            i += 1
+    for a in ax:
+        a.grid(alpha=0.3)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def schrijf_html(file_short, report_text, banen, bochten, rows, cfg, uit_pad):
+    """Zelfstandig HTML-rapport (te printen als PDF) uit hetzelfde tekstrapport en de baan/bocht-cijfers."""
+    import html as h
+    e = h.escape
+    secties = parse_rapport(report_text)
+    waarden = {(sec["titel"], r[1]): r[2] for sec in secties for r in sec["regels"] if r[0] == "kv"}
+
+    kaarten = "".join(
+        f'<div class="kaart"><div class="k">{e(label)}</div><div class="g">{e(waarden[(sec, key)])}</div></div>'
+        for sec, key, label in HTML_KPI if (sec, key) in waarden)
+
+    def is_waarschuwing(key, waarde):
+        return (key.startswith("LET OP") or "SCHEEF" in waarde or "<<" in waarde
+                or key in ("Scheef opgepakt", "Doorgeschoten")
+                or (key == "Koers-bias" and ("LINKS" in waarde or "RECHTS" in waarde)))
+
+    hints = {"Koers-bias": " Blijft dit in beide rijrichtingen even groot terwijl de afwijking van de lijn "
+                           "klein is, dan meet de dubbele antenne een vaste koersoffset: stel "
+                           "gnss.heading_offset_deg bij in de config."}
+    aandacht = [f"{key}: {waarde}.{hints.get(key, '')}" for sec in secties for soort, key, waarde in sec["regels"]
+                if soort == "kv" and is_waarschuwing(key, waarde)]
+    aandacht_html = ('<ul class="aandacht">' + "".join(f"<li>{e(a)}</li>" for a in aandacht) + "</ul>"
+                     if aandacht else '<div class="goed">Geen waarschuwingen in dit rapport.</div>')
+
+    def tabel_banen():
+        rijen = ""
+        for i, b in enumerate(banen, 1):
+            settle = f"{b['settle_s']:.1f} s" if b["settle_s"] is not None else "nooit"
+            klas = ' class="warn"' if b["oppakken"] > 0.5 else ""
+            rijen += (f"<tr{klas}><td>{i}</td><td>{b['baan']}</td><td>{b['duur']:.1f} s</td><td>{b['lengte']:.1f} m</td>"
+                      f"<td>{b['oppakken']:.2f} m</td><td>{b['uitslag']:.2f} m</td><td>{settle}</td>"
+                      f"<td>{b['gem']:.3f} / {b['max']:.3f} m</td></tr>")
+        kop = "".join(f"<th>{k}</th>" for k in ("Nr", "Baan", "Duur", "Lengte", "Oppakken", "Uitslag",
+                                                  "Op de lijn na", "Daarna gem / max"))
+        return f'<div class="tw"><table><thead><tr>{kop}</tr></thead><tbody>{rijen}</tbody></table></div>'
+
+    def tabel_bochten():
+        rijen = ""
+        for i, t in enumerate(bochten, 1):
+            van = "start" if t["van"] is None else t["van"]
+            naar = "eind" if t["naar"] is None else t["naar"]
+            opm = "TIMEOUT" if t["timeout"] else ("naast de lijn begonnen" if t["afstand_pad"] > 1.0 else "")
+            klas = ' class="warn"' if opm else ""
+            rijen += (f"<tr{klas}><td>{i}</td><td>{van} \u2192 {naar}</td><td>{t['duur']:.1f} s</td>"
+                      f"<td>{t['gem']:.1f} / {t['max']:.1f}\u00b0</td><td>{t['afstand_pad']:.2f} m</td><td>{opm}</td></tr>")
+        kop = "".join(f"<th>{k}</th>" for k in ("Nr", "Van \u2192 naar", "Duur", "Koersfout gem / max",
+                                                  "Afstand tot pad", "Opmerking"))
+        return f'<div class="tw"><table><thead><tr>{kop}</tr></thead><tbody>{rijen}</tbody></table></div>'
+
+    delen = []
+    for sec in secties:
+        inhoud = ""
+        if sec["titel"] == "PER BAAN" and banen:
+            inhoud += tabel_banen()
+        if sec["titel"] == "PER KOPAKKERBOCHT" and bochten:
+            inhoud += tabel_bochten()
+        # Uitleg die direct onder de titel staat, boven de tabel
+        voor = []
+        for soort, key, waarde in sec["regels"]:
+            if soort != "note":
+                break
+            voor.append(key)
+        intro_html = (f'<p class="intro">{e(sec["sub"])}</p>' if sec["sub"] else "")
+        intro_html += "".join(f'<p class="intro">{e(t)}</p>' for t in voor)
+        kv_html = ""
+        gezien_kv = False
+        for soort, key, waarde in sec["regels"]:
+            if soort == "note":
+                if gezien_kv:
+                    kv_html += f'<tr><td class="noot" colspan="2">{e(key)}</td></tr>'
+                continue
+            gezien_kv = True
+            klas = "sub" if soort == "sub" else ""
+            if is_waarschuwing(key, waarde):
+                klas = (klas + " warn").strip()
+            kv_html += f'<tr class="{klas}"><td>{e(key)}</td><td>{e(waarde)}</td></tr>'
+        if kv_html:
+            inhoud += f'<div class="tw"><table class="kv"><tbody>{kv_html}</tbody></table></div>'
+        delen.append(f"<section><h2>{e(sec['titel'].capitalize())}</h2>{intro_html}{inhoud}</section>")
+
+    grafiek = maak_grafiek(rows, cfg["max_center_angle"])
+    pagina = (f'<!doctype html><html lang="nl"><head><meta charset="utf-8">'
+              f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+              f'<title>Telemetrie analyse</title><style>{HTML_CSS}</style></head><body><main>'
+              f'<h1>Telemetrie analyse</h1><div class="sub">{e(file_short)}</div>'
+              f'<div class="kaarten">{kaarten}</div>'
+              f'<section><h2>Aandachtspunten</h2>{aandacht_html}</section>'
+              f'<section><h2>Verloop van de rit</h2><img alt="Verloop" src="data:image/png;base64,{grafiek}">'
+              f'<p class="intro">Grijs = kopakkerbocht.</p></section>'
+              + "".join(delen) + '</main></body></html>')
+    with open(uit_pad, "w", encoding="utf-8") as f:
+        f.write(pagina)
 
 
 if __name__ == "__main__":

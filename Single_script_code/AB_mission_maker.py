@@ -482,7 +482,7 @@ def teken_html(missie, bestand):
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Satelliet", max_zoom=22
     ).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="Wegenkaart").add_to(m)
+    folium.TileLayer(tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", attr="Esri World Street Map", name="Wegenkaart", max_zoom=22, show=False).add_to(m)
 
     kant_sign = missie["kant_sign"]
     for pos, (baan, start, eind, sign) in enumerate(missie["banen"]):

@@ -93,17 +93,12 @@ class GpsSystem:
         self.antenne_hoogte_m = float(gnss_cfg.get("antenna_height_m", 0.0))
         # De antennes staan zelden precies even hoog: die scheefstand meet de
         # dubbele antenne als 'pitch' terwijl de robot vlak staat. Hij gaat
-        # eraf. Te bepalen met terrein_kaart.py (rijd heen en terug: een
+        # eraf. Te bepalen met extract_map_terrain.py (rijd heen en terug: een
         # helling keert dan om, de montage niet).
         self.pitch_offset_deg = float(gnss_cfg.get("pitch_offset_deg", 0.0))
         # Ruwheid van het veld: spreiding van de pitch over de laatste seconde.
         self._pitch_venster = deque(maxlen=50)   # (tijd, pitch)
         self.ruwheid_deg = None
-        # Terreinlog (hoogte, helling, ruwheid per positie) voor de veldkaarten.
-        self.terrein = None
-        if gnss_cfg.get("terrain_log", True):
-            from app.services.terrein_logger import TerreinLogger
-            self.terrein = TerreinLogger(float(gnss_cfg.get("terrain_log_step_m", 0.25)))
 
         self.ser = None
         self._lock = threading.Lock()
@@ -257,6 +252,12 @@ class GpsSystem:
             (heading, bron, geldig, pos_leeftijd, vooruit_extra, voorspeld_s,
              pitch, pitch_corr) = self._momentopname(nu)
             pos = self._naar_regelpunt(self.antenne_positie, heading, geldig, vooruit_extra)
+            # Voetpunt van de antenne op de grond: daar hoort hoogte_grond_m bij (niet bij het
+            # regelpunt, dat kan 0,7 m verderop liggen). Zonder geldige koers: de antenne zelf.
+            if geldig:
+                grond = self._verplaats(self.antenne_positie, heading, vooruit_extra, 0.0)
+            else:
+                grond = {"lat": self.antenne_positie["lat"], "lon": self.antenne_positie["lon"]}
             # Hoogte van de grond onder de antenne (GGA geeft de antenne zelf).
             hoogte_grond = None
             if self.antenne_positie["fix"]:
@@ -285,6 +286,8 @@ class GpsSystem:
                 "voorspeld_s": round(voorspeld_s, 3),
                 "pitch_correctie_m": round(pitch_corr, 3),
                 "hoogte_grond_m": hoogte_grond,
+                "grond_lat": grond["lat"],
+                "grond_lon": grond["lon"],
                 "ruwheid_deg": self.ruwheid_deg,
                 "antenne_lat": self.antenne_positie["lat"],
                 "antenne_lon": self.antenne_positie["lon"],
@@ -429,9 +432,6 @@ class GpsSystem:
 
         if soort == "GGA":
             self._parse_gga(zin)
-            if self.terrein:
-                # Zelf bepaalt hij of er genoeg gereden is voor een nieuw punt.
-                self.terrein.voeg_toe(self.get_current_position())
         elif soort == "THS":
             self._parse_ths(zin)
         elif soort == "VTG":
