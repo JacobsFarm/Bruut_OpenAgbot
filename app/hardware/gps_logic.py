@@ -93,7 +93,7 @@ class GpsSystem:
         self.antenne_hoogte_m = float(gnss_cfg.get("antenna_height_m", 0.0))
         # De antennes staan zelden precies even hoog: die scheefstand meet de
         # dubbele antenne als 'pitch' terwijl de robot vlak staat. Hij gaat
-        # eraf. Te bepalen met extract_map_terrain.py (rijd heen en terug: een
+        # eraf. Te bepalen met extract_ride_report.py (rijd heen en terug: een
         # helling keert dan om, de montage niet).
         self.pitch_offset_deg = float(gnss_cfg.get("pitch_offset_deg", 0.0))
         # Ruwheid van het veld: spreiding van de pitch over de laatste seconde.

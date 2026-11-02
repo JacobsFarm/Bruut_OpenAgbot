@@ -3,7 +3,7 @@ Overlay_ritten.py  -  alle gereden ritten over elkaar op een kaart.
 
 Waarom dit script bestaat
 -------------------------
-Per rit maakt Extract_route_maps.py al een kaartje, maar daarmee zie je niet
+Per rit maakt extract_ride_report.py al een kaartje, maar daarmee zie je niet
 wat je eigenlijk wilt weten: rijdt de robot elke keer OVER DEZELFDE lijn?
 Dit script legt alle ritten uit data/logs in EEN interactieve HTML-kaart:
 
