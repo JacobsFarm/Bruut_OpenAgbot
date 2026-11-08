@@ -10,9 +10,12 @@ from app.services.vehicle_controller import VehicleController
 from app.services.navigator import Navigator
 from app.services.ab_navigator import ABNavigator
 
-# Gebruik je eigen 'config.json' als die bestaat; val anders terug op de
-# meegeleverde 'config.example.json' (het sjabloon).
-config_path = os.path.join('data', 'config.json')
+# Omgevingsvariabele AGBOT_CONFIG wint (sim_world start de backend zo met
+# data/config.sim.json). Anders je eigen 'config.json' als die bestaat, en
+# anders de meegeleverde 'config.example.json' (het sjabloon).
+config_path = os.environ.get('AGBOT_CONFIG') or os.path.join('data', 'config.json')
+if os.environ.get('AGBOT_CONFIG') and not os.path.exists(config_path):
+    raise FileNotFoundError(f"AGBOT_CONFIG wijst naar {config_path}, maar dat bestand bestaat niet")
 if not os.path.exists(config_path):
     config_path = os.path.join('data', 'config.example.json')
     print(f"⚠️ Geen data/config.json gevonden, val terug op {config_path}")

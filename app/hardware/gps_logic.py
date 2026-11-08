@@ -171,7 +171,9 @@ class GpsSystem:
     # ------------------------------------------------------------------ #
     def connect(self):
         try:
-            self.ser = serial.Serial(self.gps_port, self.gps_baudrate, timeout=1)
+            # serial_for_url: een gewone poort (/dev/..., COM4) werkt zoals altijd;
+            # 'socket://127.0.0.1:5101' verbindt met de GNSS-emulator van sim_world.
+            self.ser = serial.serial_for_url(self.gps_port, self.gps_baudrate, timeout=1)
             print(f"[GNSS] ZED-X20D verbonden op {self.gps_port} @ {self.gps_baudrate}")
 
             self._running = True

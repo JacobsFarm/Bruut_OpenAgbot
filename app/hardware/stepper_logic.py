@@ -70,7 +70,9 @@ class StepperSteering:
 
         try:
             # Korte timeout: _read_reply doet zelf het wachten tot zijn deadline.
-            self.serial_conn = serial.Serial(
+            # serial_for_url: een gewone poort werkt zoals altijd; 'socket://127.0.0.1:5102'
+            # verbindt met de stuur-Arduino-emulator van sim_world.
+            self.serial_conn = serial.serial_for_url(
                 self.port, self.baudrate, timeout=0.1, write_timeout=1.0
             )
             time.sleep(2)  # Geef de Arduino de tijd om te herstarten

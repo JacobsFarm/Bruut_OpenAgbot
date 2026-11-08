@@ -1,0 +1,200 @@
+{
+  "_comment_sim": "Configuratie voor sim_world (F:/sim_world). Gelijk aan config.example.json, behalve de verbindingen: GNSS en stuur-Arduino via TCP naar de emulators (pyserial serial_for_url), de VESC's via de python-can interface 'simcan' die sim_world installeert, en geen NTRIP (de GNSS-emulator meldt zelf de fix-soort). Starten: AGBOT_CONFIG=data/config.sim.json python run.py",
+  "system": {
+    "os": "linux"
+  },
+  "hardware": {
+    "_comment_gps": "Eén ZED-X20D (simpleRTK4 Dual) op één poort levert positie, heading (THS) en snelheid. Er is geen gps_heading_port meer. Via USB maakt de baudrate niet uit; via UART moet hij gelijk zijn aan wat configure_x20d.py instelt (460800).",
+    "_comment_poorten": "Vaste namen uit /dev/serial/by-id/ in plaats van /dev/ttyACM0/1: de ACM-nummers kunnen na een herstart of opnieuw insteken van plek wisselen, deze namen niet. Op de Jetson nu: u-blox -> ttyACM0, Arduino -> ttyACM1. De Arduino-naam bevat het serienummer van DEZE Arduino; bij een andere Arduino opnieuw kijken met: ls -l /dev/serial/by-id/",
+    "gps_port": "socket://127.0.0.1:5101",
+    "gps_baudrate": 460800,
+    "arduino_stepper_port": "socket://127.0.0.1:5102",
+    "arduino_stepper_baudrate": 115200,
+    "_comment_sim_poorten": "socket:// = TCP naar sim_world. 5101 = GNSS-emulator (NMEA + UBX), 5102 = stuur-Arduino-emulator. De baudrate doet over TCP niets."
+  },
+  "vehicle": {
+    "wheelbase_m": 1.2,
+    "track_width_m": 1.0,
+    "_comment_differentieel": "Achterwielen in de bocht. 1.0 = exact volgens de stuurgeometrie: het binnenwiel draait langzamer, het buitenwiel sneller (bij volle uitslag ca. -19% / +19%). 0.0 = beide wielen gekoppeld op hetzelfde toerental; dan vechten ze via de grond tegen elkaar, want een VESC houdt zijn toerental vast. Boven 1.0 duwen de achterwielen de bocht in (helpt als de voorwielen op zachte grond wegschuiven). Maximaal 2.0.",
+    "differential_gain": 1.0,
+    "_comment_ramp": "Optrekken en afremmen van het midden van de achteras, in m/s per seconde. Geldt voor beide wielen met dezelfde factor, zodat de bocht klopt tijdens het optrekken. Wegrijden gaat altijd in een keer naar de minimale snelheid (min_erpm); een noodstop negeert de ramp.",
+    "accel_mps2": 0.5,
+    "decel_mps2": 0.8,
+    "_comment_dodemansknop": "Handmatig rijden is een dodemansknop: de webinterface herhaalt het commando een paar keer per seconde zolang je rijdt. Komt er manual_timeout_s lang niets binnen (wifi weg, telefoon op slot, ander tabblad), dan remt hij af tot stilstand.",
+    "manual_timeout_s": 1.5
+  },
+  "battery": {
+    "_comment": "Alleen voor het dashboard en de ritlog. EGO 56 V, 5 Ah = 14S2P (VESC/README.md). De lading is een schatting uit de spanning; internal_resistance_ohm corrigeert de spanningsval onder stroom (zelf ijken: spanning in rust min spanning onder een bekende stroom, gedeeld door die stroom). Het verbruik komt uit de tellers van de VESC's, die op nul beginnen zodra de VESC's spanning krijgen.",
+    "cells": 14,
+    "capacity_ah": 5.0,
+    "internal_resistance_ohm": 0.2
+  },
+  "steering": {
+    "_comment_limiet": "max_angle_degrees is de limiet per WIEL. De maximale middenhoek wordt daaruit afgeleid en ligt lager, omdat het binnenwiel bij Ackermann scherper staat.",
+    "max_angle_degrees": 30.0,
+    "_comment_invert": "Op DEZE machine staan beide op true en dan staan de wielen goed; niet omzetten. De stuurkasten zitten gespiegeld, maar een van de twee motoren is bij het aansluiten al omgedraaid in de bedrading, dus in software moeten ze gelijk staan. Wat telt is of deze twee GELIJK of VERSCHILLEND zijn, niet welke waarde ze hebben. Opnieuw uitmeten na verbouwen: op bokken beide wielen naar dezelfde hoek sturen; zetten ze zich in een V (naar elkaar toe), klap dan precies EEN van de twee om; draaien ze samen maar de verkeerde kant op, klap ze dan ALLEBEI om.",
+    "invert_left": true,
+    "invert_right": true,
+    "_comment_snelheid": "Optioneel. Wordt bij het opstarten naar de Arduino gestuurd (V:). Lagere delay = sneller. De ramp voorkomt stapverlies bij het optrekken van de NEMA 34's.",
+    "min_step_delay_us": 300,
+    "start_step_delay_us": 1200,
+    "ramp_steps": 400,
+    "_comment_verkeer": "Onderdrukt overbodig serieel verkeer: alleen sturen bij een verandering van minstens min_change_degrees, met elke resend_interval_sec een herhaling als levensteken.",
+    "min_change_degrees": 0.1,
+    "resend_interval_sec": 1.0
+  },
+  "vesc": {
+    "_comment_bus": "Twee VESC Classic 100V op CAN, zie VESC/README_can.md. Op de Orin Nano is can0 de eigen CAN-controller van de Jetson (mttcan); de InnoMaker USB2CAN verschijnt als can1 (setup/information/innomaker_usb2can_jetson_setup.json). De ID's zijn zoals getest met VESC/vesc_slider_2_wheels.py. Voor een slcan-adapter: can_interface 'slcan' en het tty-pad als can_channel.",
+    "can_interface": "simcan",
+    "can_channel": "127.0.0.1:5103",
+    "can_bitrate": 500000,
+    "left_id": 1,
+    "right_id": 2,
+    "_comment_erpm": "Positieve eRPM = vooruit op beide wielen; de draairichting staat in de VESC zelf (Invert Motor Direction). Onder min_erpm draait een wiel niet: dat is 'Speed PID min ERPM' (s_pid_min_erpm = 900) in de VESC. Verlaag je die in VESC Tool, dan kan min_erpm mee omlaag. max_erpm mag later omhoog, maar niet boven Max ERPM in de VESC (nu 3700). max_erpm_reverse geldt alleen voor handmatig rijden; de navigatie rijdt nooit achteruit.",
+    "min_erpm": 900,
+    "max_erpm": 3700,
+    "max_erpm_reverse": 2500,
+    "_comment_omrekening": "10 poolparen x 5:1 kast = 50 eRPM per wiel-RPM. Omtrek van de 4.00-8 band (ca. 16 inch buitenmaat) = 1,277 m, dus 900 eRPM = 1,38 km/h en 3000 eRPM = 4,60 km/h. Kalibreren: 10 m rijden en distance_m in /api/motors vergelijken, of een omwenteling met de hand = 300 tacho-tellen.",
+    "pole_pairs": 10,
+    "gear_ratio": 5.0,
+    "wheel_circumference_m": 1.277,
+    "_comment_zenden": "De regellus zendt continu op send_rate_hz, ook bij stilstand; valt hij weg, dan zet de VESC-timeout (App Settings, nu 1000 ms) de motoren uit. Komt er van een VESC langer dan link_timeout_s niets binnen, dan krijgen BEIDE wielen 0, anders draait de robot om het stilstaande wiel. brake_current_a wordt alleen bij het afsluiten gebruikt, net als in het testscript.",
+    "send_rate_hz": 50,
+    "link_timeout_s": 0.5,
+    "brake_current_a": 3.0,
+    "safety": {
+      "_comment_stall": "Gevraagd toerental, maar het wiel haalt minder dan stall_speed_fraction daarvan terwijl de motorstroom boven stall_current_a staat: na stall_time_s stopt alles en blijft het stil tot POST /api/motors/reset.",
+      "stall_current_a": 10.0,
+      "stall_speed_fraction": 0.5,
+      "stall_time_s": 3.0,
+      "_comment_thermisch": "Schatting van de wikkelingtemperatuur uit de motorstroom: T += (I^2 * thermal_k - T / thermal_tau_s) * dt, bovenop ambient_c. Berekende startwaarden (ca. 60 graden boven omgeving bij 9 A continu), nog niet geijkt tegen de motorsensor. Boven motor_trip_c stopt alles tot een reset; na een herstart van de backend begint het model weer koud.",
+      "thermal_k": 0.00123,
+      "thermal_tau_s": 600,
+      "ambient_c": 25,
+      "motor_warn_c": 90,
+      "motor_trip_c": 105
+    }
+  },
+  "navigation": {
+    "lookahead_distance_m": 3.0,
+    "arrival_threshold_intermediate_m": 0.8,
+    "arrival_threshold_final_m": 0.8,
+    "_comment_ab": "Alleen voor de AB-lijn missies. headland_overrun_m = hoeveel meter de robot voorbij het einde van de baan doorrijdt voordat hij draait; diezelfde marge is aan de andere kant zijn rechte aanloop, zodat hij kaarsrecht op de nieuwe lijn ligt voordat het gewas begint. Deze waarde wordt overschreven door kopakker_extra_m uit ab_line.json.",
+    "headland_overrun_m": 2.0,
+    "turn_speed_kmh": 2.0,
+    "_comment_bocht": "turn_lookahead_m staat bewust korter dan de lookahead op de lijn: met een lange lookahead snijdt pure pursuit de kopakkerboog af en komt hij scheef de nieuwe baan in. De bocht is klaar zodra de koers binnen turn_heading_tolerance_deg van de nieuwe baanrichting ligt; turn_timeout_s is het vangnet tegen eindeloos rondjes draaien.",
+    "turn_lookahead_m": 1.5,
+    "turn_heading_tolerance_deg": 5.0,
+    "turn_timeout_s": 90.0,
+    "_comment_regelaar": "Stuurregeling op rechte stukken (AB-banen en lijnstukken tussen waypoints). 'stanley' stuurt op de koersfout en de afwijking van de vooras, en dempt met de draaisnelheid uit THS; dat kan alleen met de echte neus-heading van de dubbele antenne en trekt strak op de lijn. 'pure_pursuit' stuurt op een punt lookahead_distance_m verderop: soepeler, maar met een kleine blijvende afwijking. In de kopakkerbochten wordt altijd pure pursuit gebruikt. De regellus loopt op het ritme van de GNSS (25 Hz).",
+    "line_controller": "stanley",
+    "_comment_stanley": "gain = hoe hard een afwijking wordt teruggestuurd (1/s); te hoog = slingeren, te laag = traag terug naar de lijn. soft_speed_mps voorkomt overreactie bij lage snelheid. heading_gain weegt de koersfout. yaw_damping_s = stuurgraden tegen per graad/s draaien; verhogen als hij rond de lijn slingert.",
+    "stanley": {
+      "gain": 1.0,
+      "soft_speed_mps": 0.5,
+      "heading_gain": 1.0,
+      "yaw_damping_s": 0.05
+    },
+    "_comment_integraal": "Alleen bij stanley: werkt een vaste afwijking weg die ontstaat door een helling of een voorwiel dat net niet recht staat. integral_gain = stuurgraden per meter afwijking per seconde (0 = uit), begrensd op integral_max_deg, en hij telt alleen binnen integral_zone_m van de lijn. Begint per baan / lijnstuk opnieuw.",
+    "integral_gain": 4.0,
+    "integral_max_deg": 6.0,
+    "integral_zone_m": 0.3,
+    "_comment_ruwheid": "Langzamer op ruwe grond. Ruwheid = spreiding van de pitch (NAV-DAHEADING) over 1 seconde: op de egale baan van 1 nov 2026 mediaan 0.5, P90 0.8, max 1.7 graad. Boven start_deg gaat de snelheid lineair omlaag tot min_kmh bij vol_deg. start_deg = 0 = UIT. Om te proberen: start_deg 1.0, vol_deg 2.0.",
+    "ruwheid": {
+      "start_deg": 0.0,
+      "vol_deg": 2.0,
+      "min_kmh": 1.5
+    },
+    "_comment_gnss": "Wanneer er gereden mag worden. Per niveau 'rijden', 'langzaam' (max *_max_kmh) of 'stop'. RTK fixed rijdt altijd. rtk_float geldt ook als de RTK-correcties ouder zijn dan max_correction_age_s. dgps geldt voor alles zonder RTK (GPS, DGPS, geschat). Ouder dan max_position_age_s (25 Hz = elke 0.04 s een meting) of geen geldige heading: altijd stilstaan.",
+    "gnss": {
+      "rtk_float": "langzaam",
+      "float_max_kmh": 1.0,
+      "dgps": "stop",
+      "dgps_max_kmh": 1.0,
+      "max_position_age_s": 0.3,
+      "max_correction_age_s": 10.0
+    }
+  },
+  "gnss": {
+    "_comment_heading": "Heading komt uit NMEA-THS: de lijn van antenne GPS1 (master, achter) naar GPS2 (slave, voor). Wijst die lijn niet precies in de rijrichting, corrigeer dan met heading_offset_deg (graden, met de klok mee, wordt bij de THS-koers opgeteld). 1.1 is gemeten uit de rit van 2 nov 2026: in beide rijrichtingen stond de koers ca. 1.1 graad te ver naar links (sliphoek +1.0 en +1.2) terwijl de robot recht op de lijn reed. Controle: na de eerste rit hoort de koers-bias in het ritrapport (Single_script_code/extract_ride_report.py) rond 0 te liggen.",
+    "heading_offset_deg": 1.1,
+    "_comment_offset": "Positie van het regelpunt (midden achteras) t.o.v. antenne GPS1, in meters. Vooruit = +, rechts = +. Dus: zit GPS1 10 cm VOOR de achteras en 70 cm LINKS van het midden, dan ligt het regelpunt 10 cm achter en 70 cm rechts van de antenne: forward -0.10, right +0.70. Meet vanaf het midden van de achteras, niet vanaf het midden van de robot. Een verkeerd teken zet de positie 1 a 1,5 m ernaast.",
+    "antenna_offset_forward_m": -0.1,
+    "antenna_offset_right_m": 0.7,
+    "_comment_timeout": "Na heading_timeout_s zonder geldige THS valt de koers terug op VTG (alleen boven vtg_fallback_min_kmh, en alleen vooruit rijdend betrouwbaar); anders staat de robot stil met 'Wacht op GNSS-heading'.",
+    "heading_timeout_s": 1.0,
+    "vtg_fallback_min_kmh": 1.5,
+    "accept_estimated_heading": true,
+    "_comment_latentie": "Latentie-compensatie: positie en koers worden vooruit geschoven over de leeftijd van de meting plus latency_s (rekentijd ontvanger + USB), met de snelheid en de draaisnelheid. Bij 3 km/h is 50 ms al 4 cm.",
+    "latency_compensation": true,
+    "latency_s": 0.03,
+    "_comment_daheading": "Meet en logt UBX-NAV-DAHEADING: afstand en hoogteverschil tussen de antennes, pitch, heading-nauwkeurigheid en fixed/float. Wordt bij het opstarten aangezet in het RAM van het board (na een herstart van het board weer uit). Alleen informatie; gestuurd wordt op THS.",
+    "daheading": true,
+    "_comment_antennehoogte": "Hoogte van antenne GPS1 (fasecentrum) boven de grond (m). Kantelt de robot voor-achter, dan staat de antenne niet meer recht boven zijn voetpunt: positie (en dus kopakker en onkruidposities) wordt gecorrigeerd met hoogte x sin(pitch) uit NAV-DAHEADING, bij 1 m en 5 graden 9 cm. De ritlog bevat de hoogte van de grond (Hoogte_Grond_m = ruwe antennehoogte Hoogte_Antenne_m minus deze waarde x cos(pitch)) en de plek waar die bij hoort (Grond_Lat/Grond_Lon, het voetpunt van de antenne, niet het regelpunt). Kaarten maak je met Single_script_code/extract_ride_report.py. 0 = geen correctie, dan zijn alle hoogtes antennehoogtes. Roll (zijwaarts kantelen) wordt niet gecorrigeerd: 1 graad = ca. 1,2 cm zijwaarts.",
+    "antenna_height_m": 0.7,
+    "_comment_pitch_offset": "Scheefstand van de antennemontage (graden, + = voorste antenne GPS2 hoger). Die meet de dubbele antenne als pitch terwijl de robot vlak staat, dus hij gaat er af. 1.1 is gemeten uit de rit van 2 nov 2026 (heen 0.7, terug 1.75 graad: gemiddelde = montage, de helft van het verschil = het veld). Opnieuw bepalen na verplaatsen van de antennes: rijd heen en terug over dezelfde banen en draai Single_script_code/extract_ride_report.py; dat drukt de rest af (staat hij goed, dan is die ~0; anders pitch_offset_deg plus die waarde).",
+    "pitch_offset_deg": 1.1
+  },
+  "ntrip": {
+    "_comment_sim": "Lege host = geen NTRIP (gps_logic._start_ntrip stopt dan meteen).",
+    "host": "",
+    "port": 2101,
+    "mountpoint": "",
+    "user": "",
+    "pass": "",
+    "gga_interval_s": 10.0
+  },
+  "vision": {
+    "camera_type": "gx",
+    "gx_camera": {
+      "index": 1,
+      "fps": 15,
+      "exposure_auto": true,
+      "exposure_us": 600,
+      "exposure_min_us": 100,
+      "exposure_max_us": 800,
+      "gain_auto": true,
+      "gain_db": 8,
+      "gain_min_db": 0,
+      "gain_max_db": 20,
+      "expected_gray": 120,
+      "gamma": 0.5,
+      "black_level": null,
+      "white_balance": "once",
+      "software_gamma": 1.0,
+      "software_gain": 1.0
+    },
+    "usb_camera": {
+      "index": 0,
+      "width": 800,
+      "height": 600,
+      "fps": 100
+    },
+    "rtsp_streams": [
+      "rtsp://url"
+    ],
+    "yolo_model_path": "weights/Rumex.pt",
+    "confidence_threshold": 0.4,
+    "rotatie_graden": 0,
+    "spiegel_horizontaal": false,
+    "spiegel_verticaal": false,
+    "tracking": {
+      "screenshot_interval_s": 0.5,
+      "max_screenshots_per_plant": 20,
+      "min_frames_voor_opslaan": 3,
+      "track_verlopen_s": 1.0
+    },
+    "zones_aantal": 6,
+    "zone_offsets_meters": [
+      -0.5,
+      -0.3,
+      -0.1,
+      0.1,
+      0.3,
+      0.5
+    ],
+    "_comment_camera_positie": "Waar het midden van het camerabeeld op de grond ligt, gemeten vanaf het punt recht onder antenne GPS1 (achter): vooruit = +, rechts = +, in meters. De zone_offsets_meters komen daar zijwaarts bij. Zo krijgt elke onkruidplant zijn eigen positie, gecorrigeerd voor koers, latentie en pitch. 0 / 0 = de positie van de antenne (zoals vroeger).",
+    "camera_offset_forward_m": 0.0,
+    "camera_offset_right_m": 0.0
+  }
+}
