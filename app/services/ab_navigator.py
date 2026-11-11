@@ -108,6 +108,19 @@ class ABNavigator:
         self.turn_timeout_s = nav_cfg.get("turn_timeout_s", 90.0)
         # Sample-afstand van het bochtpad (m). Kleiner = gladder, meer punten.
         self.turn_step_m = 0.25
+        # Baan oppakken: na een bocht (en bij de start) komt hij centimeters
+        # naast de lijn en een paar graden scheef binnen. Tot hij binnen deze
+        # afwijking EN koersfout op de lijn ligt, staat de integrator van de
+        # LijnRegelaar stil: wat die in de aanloop optelt is geen vaste fout,
+        # en het kost daarna meters om het weer kwijt te raken. In de sim:
+        # afwijking na de eerste 5 m gewas van 1,3-2,3 naar 0,4-1,1 cm RMS.
+        # Na de timeout integreert hij hoe dan ook (een vaste fout groter dan
+        # de drempel moet ook weg). lane_capture_xte_m = 0 zet het uit.
+        self.capture_xte_m = float(nav_cfg.get("lane_capture_xte_m", 0.05))
+        self.capture_heading_deg = float(nav_cfg.get("lane_capture_heading_deg", 3.0))
+        self.capture_timeout_s = float(nav_cfg.get("lane_capture_timeout_s", 20.0))
+        self._baan_opgepakt = False
+        self._baan_start = None          # moment van de eerste regelstap op deze baan
 
         self.bewaker = GnssBewaker(config)
         self.regelaar = LijnRegelaar(config, self.wheelbase, self.max_angle)
@@ -218,6 +231,7 @@ class ABNavigator:
         self.current_swath = self.swath_order[0]
         self.first_sign = None
         self.pass_sign = 1.0
+        self._baan_opgepakt, self._baan_start = False, None
         self.state = "TRACKING"
         self.status_message = "Missie gestart"
         self.voltooid = False
@@ -454,6 +468,13 @@ class ABNavigator:
                 self.stop()
                 self.status_message = f"Gestopt - aandrijving: {fout}"
                 break
+            # Geofence: vooruit zou hij een verboden gebied (sloot) in rijden.
+            grens = self.vehicle.blokkade
+            if grens:
+                self.logger.error(f"AB-missie gestopt, {grens}")
+                self.stop()
+                self.status_message = f"Gestopt - {grens}"
+                break
 
             curr_pos = self.gps.get_current_position()
 
@@ -531,10 +552,15 @@ class ABNavigator:
         # lijn in de RIJRICHTING: terug (B->A) is de koers 180 graden om en
         # ligt 'rechts' aan de andere kant.
         lijn_koers = (self.base_bearing_deg + (0.0 if sign > 0 else 180.0)) % 360.0
+        self._oppakken_bijwerken(xte, self._norm180(lijn_koers - curr_pos["heading"]))
         steering = self.regelaar.stuur(
             curr_pos["heading"], lijn_koers, sign * xte, curr_pos.get("speed_kmh", 0.0),
             curr_pos.get("draaisnelheid_dps", 0.0), self.lookahead_m,
-            lijn_id=(self.missie_nr, self.order_index), dt=self._dt
+            lijn_id=(self.missie_nr, self.order_index), dt=self._dt,
+            # Banen in dezelfde rijrichting beginnen met wat de vorige geleerd heeft.
+            leer_id=(self.missie_nr, sign),
+            # Tijdens het oppakken van de lijn staat de integrator stil.
+            integreer=self._baan_opgepakt
         )
         target_bearing = lijn_koers
 
@@ -544,7 +570,7 @@ class ABNavigator:
         self.status_message = (
             f"Baan {self.current_swath} ({self.order_index + 1}/{len(self.swath_order)}) - "
             f"{'gewas' if self.in_werkzone else 'kopakker'}, nog {rest:.0f} m, "
-            f"afwijking {xte:+.2f} m"
+            f"afwijking {xte:+.2f} m{'' if self._baan_opgepakt else ', lijn oppakken'}"
         )
 
         if self.drive_logger:
@@ -560,6 +586,21 @@ class ABNavigator:
                 motor=self.vehicle.log_snapshot(),
                 xte=xte, regelaar=self.regelaar.soort, gnss=curr_pos
             )
+
+    def _oppakken_bijwerken(self, xte, koersfout):
+        """
+        Houdt bij of de lijn van deze baan is opgepakt: binnen
+        lane_capture_xte_m en lane_capture_heading_deg, of na de timeout.
+        Eenmaal opgepakt blijft dat zo tot de volgende bocht.
+        """
+        if self._baan_opgepakt:
+            return
+        nu = time.time()
+        if self._baan_start is None:
+            self._baan_start = nu
+        op_lijn = abs(xte) <= self.capture_xte_m and abs(koersfout) <= self.capture_heading_deg
+        if self.capture_xte_m <= 0.0 or op_lijn or nu - self._baan_start > self.capture_timeout_s:
+            self._baan_opgepakt = True
 
     # ------------------------------------------------------------------ #
     #  TURNING: volg het vooraf berekende kopakkerpad met pure pursuit
@@ -590,6 +631,7 @@ class ABNavigator:
             self.order_index += 1
             self.current_swath = self.swath_order[self.order_index]
             self.pass_sign = -self.pass_sign
+            self._baan_opgepakt, self._baan_start = False, None
             self.state = "TRACKING"
             if timeout:
                 self.logger.warning(

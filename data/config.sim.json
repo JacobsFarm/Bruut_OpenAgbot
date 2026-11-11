@@ -26,7 +26,7 @@
   "battery": {
     "_comment": "Alleen voor het dashboard en de ritlog. EGO 56 V, 5 Ah = 14S2P (VESC/README.md). De lading is een schatting uit de spanning; internal_resistance_ohm corrigeert de spanningsval onder stroom (zelf ijken: spanning in rust min spanning onder een bekende stroom, gedeeld door die stroom). Het verbruik komt uit de tellers van de VESC's, die op nul beginnen zodra de VESC's spanning krijgen.",
     "cells": 14,
-    "capacity_ah": 5.0,
+    "capacity_ah": 50.0,
     "internal_resistance_ohm": 0.2
   },
   "steering": {
@@ -75,6 +75,42 @@
       "motor_trip_c": 105
     }
   },
+  "geofence": {
+    "_comment": "Geofence: de robot rijdt geen verboden gebied in, bij ELKE manier van rijden (waypoints, AB-lijn, veldmissie en handmatig). De gebieden staan in data/kaart.json (formaat openagbot.kaart, gemaakt in openagbot-fieldsim; laden via het tabblad Veldmissie of PUT /api/kaart): sloten en water met hun slootzone, wegen, dijken, gebouwen, verboden gebieden en nesten in hun periode. Zonder kaart.json is er alleen bewaking tijdens een veldmissie (het blok geofence van die missie). enabled false zet alles uit. Zie docs/veldmissie.md.",
+    "enabled": true,
+    "_comment_omtrek": "Wat bewaakt wordt: de hoeken van de robot (spoorbreedte / 2 + robot_marge_m opzij, overhang_voor_m voor de vooras en overhang_achter_m achter de achteras) en de einden van het werktuig: werktuig_halve_breedte_m links en rechts, op werktuig_vooruit_m van de achteras (negatief = erachter). 0 = geen werktuig. Tijdens een veldmissie telt de halve werkbreedte van die missie als die groter is.",
+    "robot_marge_m": 0.15,
+    "overhang_voor_m": 0.25,
+    "overhang_achter_m": 0.25,
+    "werktuig_halve_breedte_m": 0.0,
+    "werktuig_vooruit_m": -0.6,
+    "_comment_remweg": "De bewaking kijkt een remweg vooruit en achteruit langs de bocht die nu gestuurd wordt: snelheid x reactietijd_s + snelheid^2 / (2 x rem_mps2), minstens vooruitkijk_min_m. Komt de robot daar een gebied in, dan gaat die rijrichting dicht en staan de wielen direct stil; de andere richting blijft open om er weer uit te rijden. Bij 3 km/h is dat ca. 0,5 m voor de grens.",
+    "reactietijd_s": 0.3,
+    "rem_mps2": 1.5,
+    "vooruitkijk_min_m": 0.3,
+    "_comment_gnss": "Zonder RTK fixed is de positie minder zeker: marge_zonder_rtk_m extra afstand rondom. zonder_positie = wat er gebeurt zonder GNSS-positie of -koers: 'rijden' (handmatig rijden blijft mogelijk, bv. in de schuur; de navigators staan dan toch al stil) of 'stop'.",
+    "marge_zonder_rtk_m": 1.0,
+    "zonder_positie": "rijden",
+    "_comment_missie": "Tijdens een veldmissie moet robot en werktuig binnen het toegestane gebied van die missie blijven; toegestaan_marge_m is hoeveel hij erbuiten mag steken voordat de missie stopt.",
+    "toegestaan_marge_m": 0.3,
+    "_comment_overbruggen": "Sta je toch in een gebied (kaart klopt niet, robot erin gezet), dan kan de bewaking overbrug_s seconden overbrugd worden (knop in de webinterface, POST /api/geofence/overbruggen): alleen handmatig en hoogstens overbrug_max_kmh. Niet lager dan ca. 1,4 km/h zetten, dat is de laagste snelheid van de wielen (min_erpm).",
+    "overbrug_max_kmh": 1.5,
+    "overbrug_s": 60
+  },
+  "missie": {
+    "_comment": "Veldmissies (data/missies/<naam>.json, formaat openagbot.veldmissie uit openagbot-fieldsim), gereden door de MissieVolger als een doorlopend pad. Rechte banen stuurt de regelaar uit navigation (stanley); bochten, rondjes en overgangen gaan met pure pursuit op een punt lookahead_m verder langs het pad. Snelheid en werktuig omhoog/omlaag komen per stuk uit de missie.",
+    "lookahead_m": 1.5,
+    "_comment_start": "Starten of hervatten kan alleen binnen aanloop_max_m van het start- of hervatpunt; de robot rijdt er met aanloop_snelheid_kmh naartoe en volgt het pad zodra hij er binnen oppak_afstand_m van is. Hervatten begint hervat_terug_m voor de plek waar hij stopte.",
+    "aanloop_max_m": 30.0,
+    "aanloop_snelheid_kmh": 2.0,
+    "oppak_afstand_m": 0.5,
+    "hervat_terug_m": 2.0,
+    "_comment_bewaking": "Verder dan max_afwijking_m naast het pad stopt de missie (in een doorgang geldt de breedte van die doorgang). De missie is klaar binnen eind_marge_m van het eind. Banen korter dan min_baan_m en de laatste baan_uitloop_m van elke baan rijdt hij met pure pursuit, zodat hij de bocht op tijd inzet.",
+    "max_afwijking_m": 1.5,
+    "eind_marge_m": 0.3,
+    "min_baan_m": 4.0,
+    "baan_uitloop_m": 0.4
+  },
   "navigation": {
     "lookahead_distance_m": 3.0,
     "arrival_threshold_intermediate_m": 0.8,
@@ -86,6 +122,10 @@
     "turn_lookahead_m": 1.5,
     "turn_heading_tolerance_deg": 5.0,
     "turn_timeout_s": 90.0,
+    "_comment_oppakken": "Na een kopakkerbocht (en bij de start van de missie) komt de robot centimeters naast de lijn en een paar graden scheef binnen. Tot hij de lijn heeft opgepakt (afwijking binnen lane_capture_xte_m EN koersfout binnen lane_capture_heading_deg) staat de integrator stil: wat die in de aanloop optelt is geen vaste fout en kost daarna meters om kwijt te raken. In de sim ging de afwijking na de eerste 5 m gewas daarmee van 1,3-2,3 naar 0,4-1,1 cm RMS. Na lane_capture_timeout_s integreert hij hoe dan ook. lane_capture_xte_m = 0 = UIT (zoals vroeger). De afwijking bij het BINNENRIJDEN van het gewas hangt vooral af van de aanloop: in de sim 6,5-8 cm met kopakker_extra_m 2 en 3,5-4 cm met 4 (ab_line.json), tegen ca. 4 s extra per bocht.",
+    "lane_capture_xte_m": 0.05,
+    "lane_capture_heading_deg": 3.0,
+    "lane_capture_timeout_s": 20.0,
     "_comment_regelaar": "Stuurregeling op rechte stukken (AB-banen en lijnstukken tussen waypoints). 'stanley' stuurt op de koersfout en de afwijking van de vooras, en dempt met de draaisnelheid uit THS; dat kan alleen met de echte neus-heading van de dubbele antenne en trekt strak op de lijn. 'pure_pursuit' stuurt op een punt lookahead_distance_m verderop: soepeler, maar met een kleine blijvende afwijking. In de kopakkerbochten wordt altijd pure pursuit gebruikt. De regellus loopt op het ritme van de GNSS (25 Hz).",
     "line_controller": "stanley",
     "_comment_stanley": "gain = hoe hard een afwijking wordt teruggestuurd (1/s); te hoog = slingeren, te laag = traag terug naar de lijn. soft_speed_mps voorkomt overreactie bij lage snelheid. heading_gain weegt de koersfout. yaw_damping_s = stuurgraden tegen per graad/s draaien; verhogen als hij rond de lijn slingert.",
@@ -99,20 +139,22 @@
     "integral_gain": 4.0,
     "integral_max_deg": 6.0,
     "integral_zone_m": 0.3,
+    "_comment_integraal_meenemen": "true = een baan begint met wat de integrator op de vorige baan in DEZELFDE rijrichting geleerd heeft, in plaats van op nul (een scheef stuur blijft scheef, een helling duwt in dezelfde rijrichting dezelfde kant op). Scheelt de eerste 8-10 s van elke baan. Alleen AB-banen; false = elke baan op nul, zoals vroeger.",
+    "integral_carry_over": true,
     "_comment_ruwheid": "Langzamer op ruwe grond. Ruwheid = spreiding van de pitch (NAV-DAHEADING) over 1 seconde: op de egale baan van 1 nov 2026 mediaan 0.5, P90 0.8, max 1.7 graad. Boven start_deg gaat de snelheid lineair omlaag tot min_kmh bij vol_deg. start_deg = 0 = UIT. Om te proberen: start_deg 1.0, vol_deg 2.0.",
     "ruwheid": {
       "start_deg": 0.0,
       "vol_deg": 2.0,
       "min_kmh": 1.5
     },
-    "_comment_gnss": "Wanneer er gereden mag worden. Per niveau 'rijden', 'langzaam' (max *_max_kmh) of 'stop'. RTK fixed rijdt altijd. rtk_float geldt ook als de RTK-correcties ouder zijn dan max_correction_age_s. dgps geldt voor alles zonder RTK (GPS, DGPS, geschat). Ouder dan max_position_age_s (25 Hz = elke 0.04 s een meting) of geen geldige heading: altijd stilstaan.",
+    "_comment_gnss": "Wanneer er gereden mag worden. Per niveau 'rijden', 'langzaam' (max *_max_kmh) of 'stop'. RTK fixed rijdt altijd. rtk_float geldt ook als de RTK-correcties ouder zijn dan max_correction_age_s. dgps geldt voor alles zonder RTK (GPS, DGPS, geschat). Ouder dan max_position_age_s (25 Hz = elke 0.04 s een meting) of geen geldige heading: altijd stilstaan. De waarden komen uit de rit van 2 nov 2026: de correcties waren twee keer tot 29 s oud terwijl de ontvanger RTK fixed bleef en de afwijking onder 2,5 cm, dus 10 s remde voor niets af (zakt de ontvanger zelf naar float, dan geldt rtk_float alsnog). En *_max_kmh niet onder ca. 2 km/h: lager komt uit op min_erpm, waar de wielen pendelen (440-1230 eRPM bij 900 gevraagd).",
     "gnss": {
       "rtk_float": "langzaam",
-      "float_max_kmh": 1.0,
+      "float_max_kmh": 2.0,
       "dgps": "stop",
-      "dgps_max_kmh": 1.0,
+      "dgps_max_kmh": 2.0,
       "max_position_age_s": 0.3,
-      "max_correction_age_s": 10.0
+      "max_correction_age_s": 30.0
     }
   },
   "gnss": {
@@ -123,6 +165,8 @@
     "antenna_offset_right_m": 0.7,
     "_comment_timeout": "Na heading_timeout_s zonder geldige THS valt de koers terug op VTG (alleen boven vtg_fallback_min_kmh, en alleen vooruit rijdend betrouwbaar); anders staat de robot stil met 'Wacht op GNSS-heading'.",
     "heading_timeout_s": 1.0,
+    "_comment_overbrugging": "Valt de THS-heading weg terwijl de positie doorloopt (rit van 2 nov 2026: 45 keer, telkens ca. 1 s), dan wordt de laatste THS-koers hoogstens heading_bridge_s seconden overbrugd met het fietsmodel (snelheid x kromming van de gevraagde stuurhoek); de regellus blijft dan op 25 Hz lopen. In de ritlog staat dat als Heading_Bron 'THS(brug)', en /api/status telt ze in gnss.heading_overbruggingen. Pas daarna geldt heading_timeout_s / VTG. 0 = UIT: koers bevroren tot heading_timeout_s en dan een sprong naar VTG, zoals vroeger.",
+    "heading_bridge_s": 3.0,
     "vtg_fallback_min_kmh": 1.5,
     "accept_estimated_heading": true,
     "_comment_latentie": "Latentie-compensatie: positie en koers worden vooruit geschoven over de leeftijd van de meting plus latency_s (rekentijd ontvanger + USB), met de snelheid en de draaisnelheid. Bij 3 km/h is 50 ms al 4 cm.",

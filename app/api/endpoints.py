@@ -1,10 +1,11 @@
 import os
 import json
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from app import vehicle_controller, navigator, ab_navigator, gps_system, config
+from app import vehicle_controller, navigator, ab_navigator, missie_volger, geofence, gps_system, config
+from app.services.missie_volger import MissieOpslag, controleer_naam
 
 try:
     from app.vision.streamer import VisionStreamer
@@ -87,11 +88,27 @@ class Waypoint(BaseModel):
     lon: float
     way_point_name: str = None
 
+class MissieStartCommand(BaseModel):
+    naam: str
+    hervat: bool = False
+    max_kmh: Optional[float] = None
+
+class MissieUpdateCommand(BaseModel):
+    max_kmh: Optional[float] = None
+    lookahead_m: Optional[float] = None
+
+class OverbrugCommand(BaseModel):
+    seconden: Optional[float] = None
+
 def stop_alle_navigatie():
     if navigator.is_active:
         navigator.stop()
     if ab_navigator.is_active:
         ab_navigator.stop()
+    if missie_volger.is_active:
+        missie_volger.stop()
+    # Wie een navigator start of stopt, rijdt niet meer met een overbrugde geofence.
+    geofence.stop_overbrugging()
 
 def laad_ab_lijnen():
     if os.path.exists(AB_LIJNEN_FILE):
@@ -116,6 +133,12 @@ def bewaar_waypoints(data):
     with open(WAYPOINTS_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+def geofence_kort():
+    poort = geofence.poort()
+    return {"toestand": geofence.toestand, "reden": poort.reden, "vooruit": poort.vooruit,
+            "achteruit": poort.achteruit, "overbrugd_s": round(geofence.overbrugd_s, 1),
+            "kaart": geofence.kaart_info is not None, "waarschuwing": geofence.waarschuwing}
+
 @router.get("/status")
 def get_status():
     pos = gps_system.get_current_position()
@@ -134,6 +157,11 @@ def get_status():
         "ab_baan_nr": ab_navigator.order_index + 1 if ab_navigator.is_active else 0,
         "ab_totaal_banen": len(ab_navigator.swath_order),
         "ab_in_werkzone": ab_navigator.in_werkzone,
+        "missie_actief": missie_volger.is_active,
+        "missie_state": missie_volger.state,
+        "missie_message": missie_volger.status_message,
+        # Geofence: staat een rijrichting dicht, en waarom (alles in /api/geofence).
+        "geofence": geofence_kort(),
         # Kort overzicht van de aandrijving; alles staat in /api/motors.
         "drive_fault": vehicle_controller.drive_fault,
         "accu_v": vehicle_controller.motor_controller.battery_voltage()
@@ -152,7 +180,11 @@ def noodstop():
 
 @router.post("/nav/manual_drive")
 def manual_drive(cmd: ManualDriveCommand):
-    stop_alle_navigatie()
+    # Niet via stop_alle_navigatie(): handmatig rijden is juist waar een
+    # overbrugde geofence voor bedoeld is.
+    for nav in (navigator, ab_navigator, missie_volger):
+        if nav.is_active:
+            nav.stop()
     # Schaal op de maximale MIDDENHOEK, niet op de wiellimiet uit de config.
     # Het binnenste voorwiel staat bij Ackermann scherper dan het virtuele
     # midden; zou de schuif op de wiellimiet schalen, dan doet het laatste stuk
@@ -167,6 +199,10 @@ def manual_drive(cmd: ManualDriveCommand):
     fout = vehicle_controller.drive_fault
     if fout:
         return {"status": "blocked", "msg": fout}
+    # Geofence: de gevraagde richting staat dicht (de andere kan nog open zijn).
+    poort = geofence.poort()
+    if (cmd.speed_kmh > 0 and not poort.vooruit) or (cmd.speed_kmh < 0 and not poort.achteruit):
+        return {"status": "blocked", "msg": f"geofence: {poort.reden}"}
     return {"status": "driving"}
 
 @router.get("/motors")
@@ -336,10 +372,156 @@ def add_waypoint(wp: Waypoint):
     bewaar_waypoints(waypoints)
     return {"status": "success", "total": len(waypoints)}
 
+@router.put("/waypoints")
+def vervang_waypoints(waypoints: list[Waypoint]):
+    """Alle waypoints in een keer vervangen (een route van duizenden punten in een verzoek)."""
+    data = [{"way_point_name": (wp.way_point_name or "").strip() or f"point {i + 1}",
+             "lat": wp.lat, "lon": wp.lon} for i, wp in enumerate(waypoints)]
+    bewaar_waypoints(data)
+    return {"status": "success", "total": len(data)}
+
 @router.delete("/waypoints")
 def clear_waypoints():
     bewaar_waypoints([])
     return {"status": "cleared"}
+
+# ----------------------------------------------------------------------
+#  Kaart en geofence (data/kaart.json) - geldt altijd, ook handmatig
+# ----------------------------------------------------------------------
+@router.get("/kaart")
+def get_kaart():
+    """De veiligheidskaart zoals hij op de robot staat."""
+    try:
+        kaart = geofence.lees_kaart()
+    except Exception as e:
+        return {"status": "error", "msg": f"kaart onleesbaar: {e}"}
+    if kaart is None:
+        return {"status": "leeg"}
+    return {"status": "ok", "kaart": kaart}
+
+@router.put("/kaart")
+def put_kaart(kaart: dict = Body(...)):
+    """Nieuwe kaart (formaat openagbot.kaart). Wordt gecontroleerd, bewaard en geldt direct."""
+    try:
+        info = geofence.bewaar_kaart(kaart)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"status": "ok", "kaart": info}
+
+@router.delete("/kaart")
+def delete_kaart():
+    """Kaart weghalen: daarna is er geen geofence meer buiten een missie."""
+    stop_alle_navigatie()
+    geofence.wis_kaart()
+    return {"status": "gewist"}
+
+@router.get("/geofence")
+def geofence_status():
+    status = geofence.status()
+    status["omtrek"] = geofence.omtrek()
+    return status
+
+@router.post("/geofence/overbruggen")
+def geofence_overbruggen(cmd: OverbrugCommand = None):
+    """
+    Bewaking tijdelijk overbruggen om met de hand uit een verboden gebied te
+    rijden: langzaam, en alleen handmatig (een lopende missie stopt).
+    """
+    stop_alle_navigatie()
+    vehicle_controller.stop()
+    duur = geofence.overbrug(cmd.seconden if cmd else None)
+    return {"status": "overbrugd", "seconden": duur, "max_kmh": geofence.overbrug_kmh}
+
+@router.delete("/geofence/overbruggen")
+def geofence_overbrugging_stoppen():
+    geofence.stop_overbrugging()
+    return {"status": "bewaking actief"}
+
+# ----------------------------------------------------------------------
+#  Veldmissies (data/missies/<naam>.json, gemaakt in openagbot-fieldsim)
+# ----------------------------------------------------------------------
+@router.get("/missies")
+def get_missies():
+    missies = MissieOpslag.lijst()
+    return {"missies": missies,
+            "voortgang": {m["naam"]: missie_volger.voortgang_op_schijf(m["naam"])
+                          for m in missies if "fout" not in m}}
+
+@router.get("/missies/{naam}")
+def get_missie(naam: str):
+    try:
+        data = MissieOpslag.lees(naam)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if data is None:
+        raise HTTPException(404, f"missie '{naam}' staat niet op de robot")
+    return data
+
+@router.put("/missies/{naam}")
+def put_missie(naam: str, missie: dict = Body(...)):
+    """Missiebestand (openagbot.veldmissie) op de robot zetten. Start niets."""
+    if missie_volger.is_active and missie_volger.naam == naam:
+        raise HTTPException(409, "deze missie rijdt nu; stop hem eerst")
+    try:
+        return {"status": "ok", "missie": MissieOpslag.bewaar(controleer_naam(naam), missie)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@router.delete("/missies/{naam}")
+def delete_missie(naam: str):
+    if missie_volger.is_active and missie_volger.naam == naam:
+        raise HTTPException(409, "deze missie rijdt nu; stop hem eerst")
+    try:
+        return {"status": "gewist" if MissieOpslag.wis(naam) else "bestond niet"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@router.post("/missie/start")
+def start_missie(cmd: MissieStartCommand):
+    stop_alle_navigatie()
+    try:
+        controleer_naam(cmd.naam)
+    except ValueError as e:
+        return {"status": "error", "msg": str(e)}
+    reden = missie_volger.start(cmd.naam, hervat=cmd.hervat, max_kmh=cmd.max_kmh)
+    if reden:
+        return {"status": "error", "msg": reden}
+    return {"status": "started", "missie": missie_volger.status()}
+
+@router.post("/missie/stop")
+def stop_missie():
+    """Missie stoppen; de voortgang blijft bewaard (start met hervat = true gaat verder)."""
+    stop_alle_navigatie()
+    vehicle_controller.stop()
+    return {"status": "stopped", "missie": missie_volger.status()}
+
+@router.post("/missie/vrijgeven")
+def missie_vrijgeven():
+    """Vrijgave voor de doorgang (oversteek) waar de missie op wacht."""
+    if not missie_volger.vrijgeven():
+        return {"status": "error", "msg": "de missie wacht niet op vrijgave"}
+    return {"status": "vrijgegeven"}
+
+@router.post("/missie/update")
+def missie_update(cmd: MissieUpdateCommand):
+    """Live aanpassen: bovengrens voor de snelheid (0 of null = snelheden van de missie) en de lookahead in bochten."""
+    missie_volger.max_kmh = cmd.max_kmh if cmd.max_kmh else None
+    if cmd.lookahead_m is not None:
+        missie_volger.lookahead_m = max(0.5, min(5.0, cmd.lookahead_m))
+    return {"status": "ok", "max_kmh": missie_volger.max_kmh, "lookahead_m": missie_volger.lookahead_m}
+
+@router.get("/missie/live")
+def missie_live(spoor_vanaf: int = 0):
+    """Alles wat het tabblad Veldmissie een paar keer per seconde nodig heeft."""
+    vanaf, punten = missie_volger.spoor_vanaf(spoor_vanaf)
+    gf = geofence.status()
+    gf["omtrek"] = geofence.omtrek()
+    return {
+        "pos": gps_system.get_current_position(),
+        "missie": missie_volger.status(),
+        "geofence": gf,
+        "spoor": {"vanaf": vanaf, "punten": punten},
+    }
 
 @router.post("/nav/start_pure_pursuit")
 def start_pure_pursuit(cmd: PurePursuitStartCommand):

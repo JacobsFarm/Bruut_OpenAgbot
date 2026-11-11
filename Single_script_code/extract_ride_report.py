@@ -306,6 +306,8 @@ def read_rows(raw_rows):
                 # Nieuwere ritten: de echte lijnafwijking (m, met teken) staat in
                 # Afwijking_m; Heading_Fout is dan bij stanley een koersfout in graden.
                 "xte": optional_float(raw, "Afwijking_m"),
+                # THS | THS(geschat) | THS(brug) | VTG | geen; leeg in oude ritten.
+                "h_bron": (raw.get("Heading_Bron") or "").strip(),
             })
         except (ValueError, KeyError, TypeError, AttributeError):
             continue
@@ -777,6 +779,14 @@ def telemetrie(raw_rows, cfg):
     lines.append(f"- RTK Float (5)     : {float_pct:.1f} %")
     lines.append(f"- Geen/zwakke fix   : {nofix_pct:.1f} % (fix < 2)")
     lines.append(f"- HDOP gemiddeld    : {avg([r['hdop'] for r in rows]):.2f}  (ideaal < 1.0)")
+    bronnen = [r["h_bron"] for r in rows if r["h_bron"]]
+    if bronnen:
+        # Elke overgang van THS naar iets anders is een keer dat de heading wegviel.
+        # THS(brug) = overbrugd met het fietsmodel; VTG = teruggevallen op course over ground.
+        uitval = sum(1 for a, b in zip(bronnen, bronnen[1:]) if a == "THS" and b != "THS")
+        brug_s = sum(r["loop_t"] for r in rows if r["h_bron"] == "THS(brug)")
+        vtg = sum(1 for b in bronnen if b == "VTG")
+        lines.append(f"- Heading-uitval    : {uitval}x (overbrugd {brug_s:.1f} s, VTG {vtg} metingen)")
     lines.append(f"- Loop-tijd gem.    : {avg(loop_tijden):.3f} s")
     lines.append(f"- Loop-tijd max.    : {max(loop_tijden):.3f} s")
     lines.append(f"- CPU-hapering      : {(stotter / total_rows) * 100:.1f} % "

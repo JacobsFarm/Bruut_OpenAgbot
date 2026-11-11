@@ -60,6 +60,12 @@ class VehicleController:
         self._speed = 0.0
         self._lock = threading.Lock()
 
+        # 4b. Geofence: een functie die een Poort geeft (vooruit, achteruit,
+        #     reden, max_kmh), zie app/services/geofence.py. Zit in de regellus
+        #     en geldt dus voor ALLES wat rijdt: navigators en handbediening.
+        self.rij_poort = None
+        self._blokkade = None            # waarom de laatste rijopdracht geweigerd is
+
         # 5. Start de regellus
         self.running = True
         self.control_thread = threading.Thread(target=self._control_loop, daemon=True)
@@ -130,12 +136,33 @@ class VehicleController:
         """Waarom de aandrijving niet rijdt (CAN weg, VESC-fout, stall), of None."""
         return self.motor_controller.fault
 
+    @property
+    def blokkade(self):
+        """
+        Waarom er nu niet VOORUIT gereden mag worden (geofence), of None. De
+        navigators rijden alleen vooruit en beeindigen hierop hun missie, net
+        als bij een drive_fault.
+        """
+        if self.rij_poort is None:
+            return None
+        poort = self.rij_poort()
+        return None if poort.vooruit else f"geofence: {poort.reden}"
+
     def reset_drive_faults(self):
         """Vrijgeven na een stall of oververhitting. Hij blijft staan tot het volgende commando."""
         with self._lock:
             self._target = (0.0, self._target[1], None)
             self._speed = 0.0
             self.motor_controller.reset_faults()
+
+    def kromming(self):
+        """
+        Kromming (1/m, positief = naar rechts) van de bocht die de gevraagde
+        stuurhoek nu oplevert: tan(middenhoek) / wielbasis. De GNSS-laag
+        gebruikt dit om een gat in de heading te overbruggen (fietsmodel).
+        Neemt geen lock: wordt vanuit de GNSS-thread aangeroepen.
+        """
+        return math.tan(math.radians(self._target[1])) / self.wheelbase
 
     def _turning_radius(self, angle_degrees):
         """
@@ -248,6 +275,26 @@ class VehicleController:
             self._forget(snapshot)
             target = 0.0
 
+        # Geofence. Is de richting waarin hij rijdt of wil rijden dicht, dan
+        # direct stilstaan (geen ramp: de bewaking kijkt maar een remweg
+        # vooruit) en het doel vergeten. De andere richting blijft open, zodat
+        # je er met de hand weer uit kunt.
+        if self.rij_poort is not None:
+            poort = self.rij_poort()
+            richting = target if target != 0.0 else self._speed
+            if (richting > 0 and not poort.vooruit) or (richting < 0 and not poort.achteruit):
+                if self._blokkade != poort.reden:
+                    self._blokkade = poort.reden
+                    self.logger.warning(f"Geofence houdt de robot tegen: {poort.reden}")
+                self._speed = 0.0
+                self._forget(snapshot)
+                motors.command(0, 0, dt)
+                return
+            if richting != 0.0:
+                self._blokkade = None
+            if poort.max_kmh is not None and abs(target) > poort.max_kmh / 3.6:
+                target = math.copysign(poort.max_kmh / 3.6, target)
+
         factor_links, factor_rechts = self._wheel_factors(angle)
         v_min, v_max = self._center_speed_range(target, factor_links, factor_rechts)
         if target != 0.0:
@@ -310,6 +357,7 @@ class VehicleController:
             "decel_mps2": self.decel_mps2,
             "manual_timeout_s": self.manual_timeout_s,
             "deadman_active": deadline is not None,
+            "geofence": self._blokkade,
         }
         return status
 

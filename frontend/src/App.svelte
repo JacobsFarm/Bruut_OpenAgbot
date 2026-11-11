@@ -4,7 +4,8 @@
   import Navigation from './components/navigation.svelte';
   import Motor from './components/motor.svelte';
   import Tractor from './components/tractor.svelte';
-  import { motors, postJson } from './lib/telemetry.js';
+  import Missie from './components/missie.svelte';
+  import { motors, status, postJson } from './lib/telemetry.js';
 
   let activeTab = 'dashboard';
 
@@ -18,6 +19,24 @@
       await postJson('/api/motors/reset');
     } catch (e) {}
   }
+
+  // Geofence (data/kaart.json): geldt bij elke manier van rijden, dus de
+  // melding hoort ook op elk tabblad. Dicht = in die richting rijdt hij niet.
+  $: geofence = $status.data?.geofence;
+  $: geofenceDicht = geofence && (!geofence.vooruit || !geofence.achteruit);
+
+  async function overbruggen() {
+    if (!confirm('Geofence 60 seconden overbruggen? Alleen om met de hand, langzaam, uit het gebied te rijden.')) return;
+    try {
+      await postJson('/api/geofence/overbruggen', {});
+    } catch (e) {}
+  }
+
+  async function bewakingAan() {
+    try {
+      await fetch('/api/geofence/overbruggen', { method: 'DELETE' });
+    } catch (e) {}
+  }
 </script>
 
 <main class="container">
@@ -27,6 +46,7 @@
       <button class:active={activeTab === 'dashboard'} on:click={() => activeTab = 'dashboard'}>Dashboard</button>
       <button class:active={activeTab === 'navigation'} on:click={() => activeTab = 'navigation'}>RTK Navigatie</button>
       <button class:active={activeTab === 'tractor'} on:click={() => activeTab = 'tractor'}>A-B Tractor</button>
+      <button class:active={activeTab === 'missie'} on:click={() => activeTab = 'missie'}>Veldmissie</button>
       <button class:active={activeTab === 'motor'} on:click={() => activeTab = 'motor'}>Handmatig (RC)</button>
       <button class:active={activeTab === 'camera'} on:click={() => activeTab = 'camera'}>Camera & YOLO</button>
     </nav>
@@ -43,6 +63,20 @@
     </div>
   {/if}
 
+  {#if !verbindingWeg && geofence?.overbrugd_s > 0}
+    <div class="banner oranje">
+      <span><b>Geofence overbrugd</b>, nog {Math.round(geofence.overbrugd_s)} s: alleen langzaam en met de hand.</span>
+      <button class="banner-knop" on:click={bewakingAan}>Bewaking aan</button>
+    </div>
+  {:else if !verbindingWeg && geofenceDicht}
+    <div class="banner rood">
+      <span><b>Geofence:</b> {geofence.reden}.
+        {!geofence.vooruit && !geofence.achteruit ? 'Vooruit en achteruit dicht.'
+          : !geofence.vooruit ? 'Vooruit dicht; achteruit kan nog.' : 'Achteruit dicht; vooruit kan nog.'}</span>
+      <button class="banner-knop" on:click={overbruggen}>Overbruggen</button>
+    </div>
+  {/if}
+
   <section class="content">
     {#if activeTab === 'dashboard'}
       <Dashboard />
@@ -50,6 +84,8 @@
       <Navigation />
     {:else if activeTab === 'tractor'}
       <Tractor />
+    {:else if activeTab === 'missie'}
+      <Missie />
     {:else if activeTab === 'motor'}
       <Motor />
     {:else if activeTab === 'camera'}
@@ -70,5 +106,6 @@
   .banner { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 15px; margin-bottom: 15px; border-radius: 6px; font-size: 15px; }
   .banner.rood { background: #c62828; color: white; }
   .banner.grijs { background: #616161; color: white; }
+  .banner.oranje { background: #ef6c00; color: white; }
   .banner-knop { background: white; color: #c62828; flex: none; }
 </style>

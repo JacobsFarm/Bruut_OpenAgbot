@@ -9,6 +9,8 @@ from app.hardware.gps_logic import GpsSystem
 from app.services.vehicle_controller import VehicleController
 from app.services.navigator import Navigator
 from app.services.ab_navigator import ABNavigator
+from app.services.geofence import GeofenceBewaker
+from app.services.missie_volger import MissieVolger
 
 # Omgevingsvariabele AGBOT_CONFIG wint (sim_world start de backend zo met
 # data/config.sim.json). Anders je eigen 'config.json' als die bestaat, en
@@ -26,8 +28,16 @@ with open(config_path, 'r') as f:
 
 gps_system = GpsSystem(config)
 vehicle_controller = VehicleController(config)
+# Valt de heading (THS) even weg, dan overbrugt de GNSS-laag dat met het
+# fietsmodel; daarvoor moet hij weten welke bocht er nu gestuurd wordt.
+gps_system.krommings_bron = vehicle_controller.kromming
+# Geofence (data/kaart.json): een poort in de regellus van de VehicleController,
+# dus geldig voor elke navigator en voor handmatig rijden.
+geofence = GeofenceBewaker(gps_system, config, kromming=vehicle_controller.kromming)
+vehicle_controller.rij_poort = geofence.poort
 navigator = Navigator(gps_system, vehicle_controller, config)
 ab_navigator = ABNavigator(gps_system, vehicle_controller, config)
+missie_volger = MissieVolger(gps_system, vehicle_controller, config, geofence)
 
 from app.api.endpoints import router as api_router
 
@@ -36,9 +46,10 @@ async def lifespan(app):
     yield
     # Bij afsluiten (Ctrl+C) de navigatie stoppen en de wielen zelf stilzetten,
     # in plaats van te wachten tot de VESC-timeout ze uitzet.
-    for nav in (navigator, ab_navigator):
+    for nav in (navigator, ab_navigator, missie_volger):
         if nav.is_active:
             nav.stop()
+    geofence.shutdown()
     vehicle_controller.shutdown()
 
 def create_app():

@@ -54,16 +54,22 @@ class GnssBewaker:
       - RTK, maar de correcties zijn ouder dan max_correction_age_s -> als
         float behandelen: de ontvanger rekent dan nog even door op oude data
     Een beleid is "rijden", "langzaam" of "stop".
+
+    De standaardwaarden komen uit de rit van 2 nov 2026. De correcties waren
+    daar twee keer tot 29 s oud terwijl de ontvanger RTK fixed bleef melden en
+    de afwijking onder 2,5 cm bleef; de oude grens van 10 s remde dus 24 s
+    lang voor niets af. En 'langzaam' op 1 km/h komt uit op min_erpm, waar de
+    wielen pendelen (440-1230 eRPM bij 900 gevraagd): vandaar 2 km/h.
     """
 
     def __init__(self, config):
         c = config.get("navigation", {}).get("gnss", {})
         self.float_beleid = c.get("rtk_float", "langzaam")
-        self.float_max_kmh = float(c.get("float_max_kmh", 1.0))
+        self.float_max_kmh = float(c.get("float_max_kmh", 2.0))
         self.dgps_beleid = c.get("dgps", "stop")
-        self.dgps_max_kmh = float(c.get("dgps_max_kmh", 1.0))
+        self.dgps_max_kmh = float(c.get("dgps_max_kmh", 2.0))
         self.max_positie_leeftijd_s = float(c.get("max_position_age_s", 0.3))
-        self.max_correctie_leeftijd_s = float(c.get("max_correction_age_s", 10.0))
+        self.max_correctie_leeftijd_s = float(c.get("max_correction_age_s", 30.0))
         # Langzamer op ruwe grond (spreiding van de pitch over 1 s). Boven
         # start_deg gaat de snelheid lineair omlaag tot min_kmh bij vol_deg.
         # start_deg = 0 zet het uit.
@@ -141,7 +147,19 @@ class LijnRegelaar:
     In de simulatie (1.5 graad scheef stuur / 3 cm/s zijdrift) haalt dat de
     afwijking terug van 3.7 / 9.2 cm naar 1.5 / 2.3 cm RMS. Pure pursuit
     houdt bewust zijn oude gedrag (zonder integrator) als terugvaloptie.
+
+    Wat de integrator op een lijn geleerd heeft, neemt hij mee naar de
+    volgende lijn met hetzelfde 'leer_id' (bij AB-banen: dezelfde
+    rijrichting). Een scheef stuur blijft scheef en een helling duwt in
+    dezelfde rijrichting dezelfde kant op, dus beginnen op nul kost elke baan
+    opnieuw 8 a 10 seconden met 3-6 cm afwijking (rit van 2 nov 2026) - en
+    dat zijn net de eerste meters gewas.
     """
+
+    # Tijdconstante van het gemiddelde dat wordt meegenomen, en hoe lang er
+    # op een lijn geintegreerd moet zijn voordat dat gemiddelde iets zegt.
+    I_GEM_TAU_S = 5.0
+    I_LEER_MIN_S = 10.0
 
     def __init__(self, config, wielbasis, max_hoek):
         nav = config.get("navigation", {})
@@ -154,18 +172,38 @@ class LijnRegelaar:
         self.k_i = float(nav.get("integral_gain", 4.0))     # graden stuur per meter.seconde afwijking
         self.i_max = float(nav.get("integral_max_deg", 6.0))
         self.i_zone = float(nav.get("integral_zone_m", 0.3))
+        self.i_meenemen = bool(nav.get("integral_carry_over", True))
         self.wielbasis = wielbasis
         self.max_hoek = max_hoek
         self._integraal = 0.0                                # graden stuur
         self._lijn = None
+        self._leer = None                                    # leer_id van de huidige lijn
+        self._i_gem = 0.0                                    # traag gemiddelde van de integrator
+        self._i_tijd = 0.0                                   # seconden geintegreerd op deze lijn
+        self._geleerd = {}                                   # leer_id -> integrator om mee te beginnen
+
+    def _nieuwe_lijn(self, lijn_id, leer_id):
+        """Bewaart wat op de vorige lijn geleerd is en zet de integrator klaar voor de nieuwe."""
+        if self._leer is not None and self._i_tijd >= self.I_LEER_MIN_S:
+            self._geleerd.pop(self._leer, None)              # opnieuw achteraan: nieuwste blijft het langst
+            self._geleerd[self._leer] = self._i_gem
+            while len(self._geleerd) > 8:
+                self._geleerd.pop(next(iter(self._geleerd)))
+        self._lijn, self._leer = lijn_id, (leer_id if self.i_meenemen else None)
+        self._integraal = self._geleerd.get(self._leer, 0.0) if self._leer is not None else 0.0
+        self._i_gem, self._i_tijd = self._integraal, 0.0
 
     def stuur(self, heading, lijn_koers, afwijking_m, snelheid_kmh, draaisnelheid_dps, lookahead_m,
-              lijn_id=None, dt=0.04):
+              lijn_id=None, dt=0.04, leer_id=None, integreer=True):
         """
         heading      - neus (graden)
         lijn_koers   - richting van de lijn in de rijrichting (graden)
         afwijking_m  - regelpunt (midden achteras) t.o.v. de lijn, + = rechts ervan
         lijn_id      - wisselt per baan / lijnstuk: dan begint de integrator opnieuw
+        leer_id      - lijnen met hetzelfde leer_id beginnen met wat de vorige
+                       geleerd heeft in plaats van op nul; None = altijd op nul
+        integreer    - False = integrator vasthouden (tijdens het oppakken van de
+                       lijn: wat hij dan optelt is de aanloop, geen vaste fout)
         Geeft de stuurhoek van het virtuele midden van de vooras (graden, + = rechts).
         """
         if self.soort == "pure_pursuit":
@@ -173,13 +211,17 @@ class LijnRegelaar:
             return self.pure_pursuit(doel, heading, lookahead_m)
 
         if lijn_id != self._lijn:
-            self._lijn, self._integraal = lijn_id, 0.0
+            self._nieuwe_lijn(lijn_id, leer_id)
         v = max(0.0, snelheid_kmh / 3.6)
         # Integreren alleen als hij rijdt, dicht bij de lijn en ongeveer in de
         # goede richting; anders (oppakken van de lijn) zou hij oplopen.
-        if v > 0.2 and abs(afwijking_m) < self.i_zone and abs(norm180(lijn_koers - heading)) < 20.0:
-            self._integraal -= self.k_i * afwijking_m * min(dt, 0.2)
+        if (integreer and v > 0.2 and abs(afwijking_m) < self.i_zone
+                and abs(norm180(lijn_koers - heading)) < 20.0):
+            stap = min(dt, 0.2)
+            self._integraal -= self.k_i * afwijking_m * stap
             self._integraal = max(-self.i_max, min(self.i_max, self._integraal))
+            self._i_tijd += stap
+            self._i_gem += (self._integraal - self._i_gem) * min(1.0, stap / self.I_GEM_TAU_S)
 
         koersfout = norm180(lijn_koers - heading)          # + = lijn ligt rechts van de neus
         # Afwijking van de vooras: wijst de neus schuin weg, dan ligt de vooras

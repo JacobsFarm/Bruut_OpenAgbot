@@ -156,6 +156,13 @@ class Navigator:
                 self.status_message = f"Aandrijving: {fout}"
                 self.logger.error(f"Navigatie gestopt, aandrijving: {fout}")
                 break
+            # Geofence: vooruit zou hij een verboden gebied (sloot) in rijden.
+            grens = self.vehicle.blokkade
+            if grens:
+                self.state = "FOUT"
+                self.status_message = f"Gestopt - {grens}"
+                self.logger.error(f"Navigatie gestopt, {grens}")
+                break
 
             # 1. Nieuwste GNSS-meting, en mag daarop gereden worden?
             curr_pos = self.gps.get_current_position()

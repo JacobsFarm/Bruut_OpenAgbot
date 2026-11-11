@@ -38,6 +38,11 @@ class GpsSystem:
     draaisnelheid van de neus, de leeftijd van positie, koers en
     RTK-correcties, en een positie die voor de latentie gecompenseerd is.
 
+    Valt de heading even weg terwijl de positie doorloopt (in de rit van
+    2 nov 2026 45 keer, telkens ~1 s), dan wordt de laatste THS-koers
+    overbrugd met het fietsmodel: draaisnelheid = snelheid x kromming van de
+    gevraagde stuurhoek. Zie _kies_heading() en 'heading_bridge_s'.
+
     Koersconventie: THS geeft de hoek met de klok mee vanaf het ware noorden,
     langs de lijn van de MASTER-antenne (GPS1, achter) naar de SLAVE-antenne
     (GPS2, voor). Dat is exact hetzelfde kompasstelsel als de navigators
@@ -75,9 +80,22 @@ class GpsSystem:
         # Onder deze snelheid zegt course-over-ground niets; dan geen VTG-terugval.
         self.vtg_fallback_min_kmh = float(gnss_cfg.get("vtg_fallback_min_kmh", 1.5))
         self.accepteer_geschatte_heading = bool(gnss_cfg.get("accept_estimated_heading", True))
+        # Zo lang mag een gat in de THS-heading overbrugd worden met het
+        # fietsmodel (zie _kies_heading). 0 = uit: dan blijft de koers bevroren
+        # tot heading_timeout_s en valt hij daarna terug op VTG, zoals vroeger.
+        self.heading_brug_s = float(gnss_cfg.get("heading_bridge_s", 3.0))
+        # Kromming (1/m, + = naar rechts) van de stuurhoek die nu gevraagd
+        # wordt; wordt in app/__init__.py gekoppeld aan de VehicleController.
+        # Zonder bron overbrugt hij met de laatst gemeten draaisnelheid.
+        self.krommings_bron = None
         # GGA terugsturen naar de NTRIP-caster (nodig voor VRS/NEAR-mountpoints,
         # die de dichtstbijzijnde basis kiezen op basis van jouw positie).
         self.ntrip_gga_interval_s = float(self.ntrip_cfg.get("gga_interval_s", 10.0))
+        # Zo lang stilte op een verbonden correctiestroom geldt als een dode
+        # verbinding. Een basis stuurt elke seconde; in de rit van 2 nov 2026
+        # viel de stroom twee keer stil (13 en 29 s) zonder dat de verbinding
+        # verbrak, en de oude grens van 30 s wachtte dat helemaal uit.
+        self.ntrip_stilte_s = max(2.0, float(self.ntrip_cfg.get("stall_timeout_s", 5.0)))
         # Tijd tussen de meting in de ontvanger en het moment dat de navigator
         # hem gebruikt (rekentijd ontvanger + seriële lijn). De positie wordt
         # over die tijd plus de leeftijd van de laatste zin vooruit geschoven
@@ -127,6 +145,14 @@ class GpsSystem:
         # positief = naar rechts). Kan alleen met een echte neus-heading op 25 Hz.
         self.draaisnelheid_dps = 0.0
         self._vorige_ths = None          # (tijd, koers)
+        # Overbrugging: hoeveel de neus volgens het model gedraaid is sinds de
+        # laatste geldige THS, en tot welk moment dat is bijgehouden.
+        self._brug_delta = 0.0
+        self._brug_tijd = 0.0
+        self._brug_omega_dps = 0.0
+        self._brug_actief = False
+        self.heading_overbruggingen = 0  # aantal gaten dat overbrugd is (diagnostiek)
+        self._snelheid_tijd = 0.0        # laatste VTG of RMC met een snelheid
         # Course over ground vergeleken met de neus: +1 vooruit, -1 achteruit,
         # 0 = stil of onbekend. De sliphoek is hoeveel de beweging naast de neus
         # ligt als hij vooruit rijdt (wegglijden op een helling, in een bocht).
@@ -210,6 +236,10 @@ class GpsSystem:
             omhoog) of achter de antenne.
         """
         heading, bron, geldig = self._kies_heading(nu)
+        overbrugd = bron == self.BRON_BRUG
+        # Tijdens een overbrugging is de gemeten draaisnelheid oud; dan geldt
+        # die van het model.
+        draai = self._brug_omega_dps if overbrugd else self.draaisnelheid_dps
         pos_leeftijd = (nu - self.gga_tijd) if self.gga_tijd else None
         vooruit_extra, voorspeld_s = 0.0, 0.0
         if self.latentie_compensatie and geldig and pos_leeftijd is not None and pos_leeftijd < 0.5:
@@ -217,13 +247,17 @@ class GpsSystem:
             richting = -1.0 if self.rijrichting < 0 else 1.0
             vooruit_extra = richting * self.current_speed_kmh / 3.6 * voorspeld_s
             heading_s = (nu - self.heading_tijd) + self.latentie_s
-            if bron.startswith("THS") and heading_s < 0.5:
-                heading = (heading + self.draaisnelheid_dps * heading_s) % 360.0
+            if overbrugd:
+                # De overbrugde koers loopt al tot 'nu'; alleen de latentie nog.
+                heading = (heading + draai * self.latentie_s) % 360.0
+            elif bron.startswith("THS") and heading_s < 0.5:
+                heading = (heading + draai * heading_s) % 360.0
         pitch = self._verse_pitch(nu)
         pitch_corr = 0.0
         if self.antenne_hoogte_m > 0.0 and pitch is not None:
             pitch_corr = self.antenne_hoogte_m * math.sin(math.radians(pitch))
-        return heading, bron, geldig, pos_leeftijd, vooruit_extra + pitch_corr, voorspeld_s, pitch, pitch_corr
+        return (heading, bron, geldig, pos_leeftijd, vooruit_extra + pitch_corr, voorspeld_s,
+                pitch, pitch_corr, draai)
 
     def _verse_pitch(self, nu):
         """Pitch uit NAV-DAHEADING, alleen als hij vers (< 0.2 s) en 'fixed' is."""
@@ -241,7 +275,7 @@ class GpsSystem:
         zonder geldige koers (dan weten we niet welke kant 'vooruit' is).
         """
         with self._lock:
-            heading, _, geldig, _, extra, _, _, _ = self._momentopname(time.time())
+            heading, _, geldig, _, extra, _, _, _, _ = self._momentopname(time.time())
             if not geldig or self.antenne_positie["fix"] == 0:
                 return None
             pos = self._verplaats(self.antenne_positie, heading, vooruit_m + extra, rechts_m)
@@ -252,7 +286,7 @@ class GpsSystem:
         with self._lock:
             nu = time.time()
             (heading, bron, geldig, pos_leeftijd, vooruit_extra, voorspeld_s,
-             pitch, pitch_corr) = self._momentopname(nu)
+             pitch, pitch_corr, draai) = self._momentopname(nu)
             pos = self._naar_regelpunt(self.antenne_positie, heading, geldig, vooruit_extra)
             # Voetpunt van de antenne op de grond: daar hoort hoogte_grond_m bij (niet bij het
             # regelpunt, dat kan 0,7 m verderop liggen). Zonder geldige koers: de antenne zelf.
@@ -279,7 +313,7 @@ class GpsSystem:
                 "heading_geldig": geldig,
                 "speed_kmh": self.current_speed_kmh,
                 "course_over_ground": self.course_over_ground,
-                "draaisnelheid_dps": round(self.draaisnelheid_dps, 2),
+                "draaisnelheid_dps": round(draai, 2),
                 "rijrichting": self.rijrichting,
                 "sliphoek_deg": None if self.sliphoek_deg is None else round(self.sliphoek_deg, 1),
                 "positie_leeftijd_s": None if pos_leeftijd is None else round(pos_leeftijd, 3),
@@ -315,16 +349,27 @@ class GpsSystem:
     def wacht_op_epoch(self, vorige, timeout=0.1):
         """
         Wacht tot er na epoch 'vorige' een nieuwe complete meting (GGA + THS)
-        binnen is, hoogstens 'timeout' seconden. Geeft het nieuwe epochnummer;
-        bij een timeout het oude, zodat de navigator toch zijn veiligheids-
-        controles doet (geen data = stilstaan).
+        binnen is, hoogstens 'timeout' seconden. Blijft de THS weg, dan telt
+        elke nieuwe positie als meting (zie _epoch_deel). Geeft het nieuwe
+        epochnummer; bij een timeout het oude, zodat de navigator toch zijn
+        veiligheidscontroles doet (geen data = stilstaan).
         """
         with self._epoch_cond:
             self._epoch_cond.wait_for(lambda: self._epoch != vorige, timeout)
             return self._epoch
 
     def _epoch_deel(self, soort):
-        """Aanroepen met de lock vast. Een epoch is rond als GGA en THS er allebei zijn."""
+        """
+        Aanroepen met de lock vast. Een epoch is rond als GGA en THS er allebei
+        zijn. Komt er een tweede GGA zonder dat er een THS tussen zat, dan is
+        de heading weggevallen: die positie telt dan zelf als epoch, zodat de
+        navigator op 25 Hz blijft regelen (met de overbrugde koers) in plaats
+        van op zijn timeout van 10 Hz.
+        """
+        if soort == "GGA" and "GGA" in self._epoch_delen:
+            self._epoch_delen.clear()
+            self._epoch += 1
+            self._epoch_cond.notify_all()
         self._epoch_delen.add(soort)
         if {"GGA", "THS"} <= self._epoch_delen:
             self._epoch_delen.clear()
@@ -344,6 +389,7 @@ class GpsSystem:
                 "heading_hz": self._frequentie(self._ths_tijden),
                 "heading_bron": self.heading_bron,
                 "heading_geldig": self.heading_geldig,
+                "heading_overbruggingen": self.heading_overbruggingen,
                 "checksum_fouten": self._checksum_fouten,
                 "data_leeftijd_s": round(time.time() - self._laatste_nmea_tijd, 2)
                 if self._laatste_nmea_tijd else None,
@@ -595,6 +641,7 @@ class GpsSystem:
                 self.laatste_gga_zin = zin
                 self.gga_tijd = time.time()
                 self._gga_tijden.append(self.gga_tijd)
+                self._brug_bijwerken(self.gga_tijd)
                 self._epoch_deel("GGA")
         except Exception:
             pass
@@ -636,6 +683,7 @@ class GpsSystem:
                 self.heading_bron = bron
                 self.heading_geldig = True
                 self.heading_tijd = nu
+                self._brug_delta, self._brug_tijd, self._brug_actief = 0.0, nu, False
                 self._ths_tijden.append(nu)
                 self._epoch_deel("THS")
         except Exception:
@@ -652,7 +700,9 @@ class GpsSystem:
             ruw = self._norm180(koers - k0) / (nu - t0)
             self.draaisnelheid_dps += 0.3 * (ruw - self.draaisnelheid_dps)
         elif not self._vorige_ths or nu - self._vorige_ths[0] > 0.25:
-            self.draaisnelheid_dps = 0.0
+            # Na een overbrugd gat verder met de draaisnelheid van het model:
+            # midden in een bocht is nul er 15 graden/s naast.
+            self.draaisnelheid_dps = self._brug_omega_dps if self._brug_actief else 0.0
         self._vorige_ths = (nu, koers)
 
     @staticmethod
@@ -689,7 +739,7 @@ class GpsSystem:
                     self.current_speed_kmh = float(d[7])
                     if d[1]:
                         self.course_over_ground = float(d[1])
-                    self._laatste_vtg_tijd = time.time()
+                    self._laatste_vtg_tijd = self._snelheid_tijd = time.time()
                     self._update_rijrichting()
         except Exception:
             pass
@@ -706,6 +756,7 @@ class GpsSystem:
                 with self._lock:
                     if (time.time() - self._laatste_vtg_tijd) > 2.0:
                         self.current_speed_kmh = float(d[7]) * 1.852
+                        self._snelheid_tijd = time.time()
                         if len(d) >= 9 and d[8]:
                             self.course_over_ground = float(d[8])
                         self._update_rijrichting()
@@ -715,16 +766,33 @@ class GpsSystem:
     # ------------------------------------------------------------------ #
     #  Koers kiezen en positie omrekenen
     # ------------------------------------------------------------------ #
+    BRON_BRUG = "THS(brug)"
+    # Een THS ouder dan dit (2,5 meting op 25 Hz) geldt als gemist.
+    BRUG_NA_S = 0.1
+
     def _kies_heading(self, nu):
         """
-        THS gaat altijd voor. Alleen als die te oud of ongeldig is, en de robot
-        hard genoeg rijdt om er iets aan te hebben, vallen we terug op course
-        over ground. Rijdt hij daarvoor te langzaam, dan houden we de laatst
-        bekende koers vast maar melden we hem als ONGELDIG - dan kunnen de
-        navigators zelf besluiten te stoppen.
+        THS gaat altijd voor. Komt er even geen (geldige) THS terwijl de
+        positie doorloopt, dan overbruggen we het gat vanaf de laatste THS met
+        het fietsmodel - hoogstens heading_bridge_s. Daarna, of als
+        overbruggen niet kan, geldt het oude vangnet: de laatste THS tot
+        heading_timeout_s, dan course over ground als de robot hard genoeg
+        rijdt om er iets aan te hebben. Rijdt hij daarvoor te langzaam, dan
+        houden we de laatst bekende koers vast maar melden we hem als
+        ONGELDIG - dan kunnen de navigators zelf besluiten te stoppen.
         """
-        vers = (nu - self.heading_tijd) <= self.heading_timeout_s
-        if self.heading_geldig and vers:
+        leeftijd = nu - self.heading_tijd
+        if self.heading_geldig and leeftijd <= self.BRUG_NA_S:
+            return self.current_heading, self.heading_bron, True
+
+        if self._brug_mogelijk(nu, leeftijd):
+            self._brug_bijwerken(nu)
+            if not self._brug_actief:
+                self._brug_actief = True
+                self.heading_overbruggingen += 1
+            return (self.current_heading + self._brug_delta) % 360.0, self.BRON_BRUG, True
+
+        if self.heading_geldig and leeftijd <= self.heading_timeout_s:
             return self.current_heading, self.heading_bron, True
 
         if self.current_speed_kmh >= self.vtg_fallback_min_kmh:
@@ -736,6 +804,60 @@ class GpsSystem:
             return cog % 360.0, "VTG", True
 
         return self.current_heading, "geen", False
+
+    def _brug_mogelijk(self, nu, leeftijd):
+        """
+        Overbruggen kan als er ooit een geldige THS was, die niet ouder is dan
+        heading_bridge_s, en positie en snelheid nog wel vers binnenkomen
+        (anders is de hele ontvanger weg en heeft het model niets om op te
+        rekenen).
+        """
+        return (self.heading_brug_s > 0.0 and self.heading_tijd > 0.0
+                and leeftijd <= self.heading_brug_s
+                and self.antenne_positie["fix"] > 0
+                and nu - self.gga_tijd < 0.5
+                and nu - self._snelheid_tijd < 1.0)
+
+    def _brug_bijwerken(self, nu):
+        """
+        Aanroepen met de lock vast, bij elke positie en elke opvraging. Telt de
+        draaiing volgens het model op sinds de vorige stap. Een geldige THS zet
+        de teller weer op nul, dus in normaal bedrijf blijft hij (bijna) leeg.
+        """
+        if not self.heading_tijd:
+            return
+        dt = nu - self._brug_tijd
+        if dt <= 0.0:
+            return
+        self._brug_omega_dps = self._model_draaisnelheid()
+        self._brug_delta += self._brug_omega_dps * min(dt, 0.25)
+        self._brug_tijd = nu
+
+    def _model_draaisnelheid(self):
+        """
+        Draaisnelheid van de neus (graden/s, + = naar rechts) uit het
+        fietsmodel: snelheid van het regelpunt x kromming van de gevraagde
+        stuurhoek. De GNSS-snelheid is die van de ANTENNE; staat die naast het
+        midden, dan loopt hij in een bocht buitenom of binnendoor en rijdt hij
+        sneller of langzamer dan het regelpunt (0,7 m ernaast in de kortste
+        bocht: 27 %). Daar rekenen we voor terug.
+        Zonder krommings_bron: de laatst gemeten draaisnelheid.
+        """
+        kromming = None
+        if self.krommings_bron is not None:
+            try:
+                kromming = float(self.krommings_bron())
+            except Exception:
+                kromming = None
+        if kromming is None:
+            return self.draaisnelheid_dps
+        v = self.current_speed_kmh / 3.6 * (-1.0 if self.rijrichting < 0 else 1.0)
+        # Antenne t.o.v. het regelpunt: de offsets in de config wijzen andersom.
+        ant_vooruit, ant_rechts = -self.antenne_offset_vooruit_m, -self.antenne_offset_rechts_m
+        schaal = math.hypot(1.0 - kromming * ant_rechts, kromming * ant_vooruit)
+        if schaal > 0.2:
+            v /= schaal
+        return math.degrees(v * kromming)
 
     def _naar_regelpunt(self, antenne, heading, heading_geldig, vooruit_extra=0.0):
         """
@@ -803,8 +925,13 @@ class GpsSystem:
             return
         while self._running:
             sock = None
+            # Lukt het verbinden zelf niet (caster weg, geen netwerk, wachtwoord
+            # fout), dan rustig aan. Liep de stroom al, dan meteen opnieuw:
+            # elke seconde zonder correcties telt.
+            wacht = 5.0
             try:
                 sock, data = self._ntrip_verbind()
+                wacht = 1.0
                 print(f"[NTRIP] Verbonden met {self.ntrip_cfg['host']}/{self.ntrip_cfg['mountpoint']}, "
                       "correcties gaan naar de ZED-X20D...")
                 self.ntrip_status.update(status="verbonden", fout=None)
@@ -831,10 +958,10 @@ class GpsSystem:
                             sock.sendall((gga + "\r\n").encode())
                             laatste_gga = nu
 
-                    # Zonder fix (nog geen GGA) mag de caster zwijgen;
-                    # met fix is 30 s stilte een dode verbinding.
-                    if self.laatste_gga_zin is not None and nu - laatste_data > 30.0:
-                        raise ConnectionError("30 s geen correcties ontvangen")
+                    # Zonder fix (nog geen GGA) mag de caster zwijgen; met fix
+                    # is stilte een dode verbinding en beginnen we opnieuw.
+                    if self.laatste_gga_zin is not None and nu - laatste_data > self.ntrip_stilte_s:
+                        raise ConnectionError(f"{self.ntrip_stilte_s:.0f} s geen correcties ontvangen")
                     try:
                         data = sock.recv(4096)
                     except socket.timeout:
@@ -844,11 +971,11 @@ class GpsSystem:
                         raise ConnectionError("caster heeft de verbinding gesloten")
             except Exception as e:
                 self.ntrip_status.update(status="herverbinden", fout=str(e))
-                print(f"[NTRIP ERROR] {e} - herverbinden in 5 s")
+                print(f"[NTRIP ERROR] {e} - herverbinden in {wacht:.0f} s")
             finally:
                 if sock:
                     sock.close()
-            time.sleep(5)
+            time.sleep(wacht)
 
     def _ntrip_verbind(self):
         """
