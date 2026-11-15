@@ -7,6 +7,9 @@
     // Plan voor instellingen die nog niet rijden (uit het tabblad A-B Tractor).
     // Loopt er een missie, dan toont de kaart altijd het plan van de robot zelf.
     export let voorbeeld = null;
+    // False zolang het tabblad niet in beeld is: dan vraagt de kaart nog maar af en toe
+    // de stand op, en zodra hij weer in beeld komt meet hij zijn vlak opnieuw op.
+    export let actief = true;
 
     // Zo vaak vragen we positie, voortgang en nieuw spoor op. De GPS levert
     // 10 Hz; bij 3 km/h schuift de robot per verversing zo'n 25 cm op.
@@ -65,6 +68,7 @@
     $: actief = live?.ab?.actief ?? false;
     $: toonPlan = actief ? missiePlan : (voorbeeld || missiePlan);
     $: if (kaart) tekenPlan(toonPlan);
+    $: if (kaart && actief) setTimeout(() => kaart?.invalidateSize(), 0);
 
     $: pos = live?.pos;
     $: heeftPositie = !!(pos && pos.lat && pos.lon);
@@ -128,7 +132,7 @@
         } catch (e) {
             verbonden = false;
         }
-        if (bezig) timer = setTimeout(tik, POLL_MS);
+        if (bezig) timer = setTimeout(tik, actief ? POLL_MS : 2000);
     }
 
     function verwerk(data) {
@@ -415,16 +419,16 @@
 </script>
 
 <div class="veldkaart">
-    <div class="balk">
+    <div class="kaartbalk">
         <button class:aan={volgen} on:click={wisselVolgen} disabled={!heeftPositie}>
             {volgen ? 'Volgt de robot' : 'Volg robot'}
         </button>
         <button on:click={heelVeld} disabled={!toonPlan}>Heel veld</button>
     </div>
 
-    <div class="kaart" bind:this={kaartDiv}></div>
+    <div class="kaartvlak" bind:this={kaartDiv}></div>
 
-    <div class="info">
+    <div class="klein info">
         {#if !verbonden}
             <span class="let-op">Geen verbinding met de robot</span>
         {:else if heeftPositie}
@@ -433,10 +437,8 @@
         {:else}
             <span class="let-op">Nog geen GPS-positie van de robot</span>
         {/if}
+        {#if toonPlan}<br>{bron}. Eerste baan {eersteBaan}.{/if}
     </div>
-    {#if toonPlan}
-        <div class="info">{bron}. Eerste baan {eersteBaan}.</div>
-    {/if}
 
     <div class="legenda">
         <span><i class="lijn gepland"></i>gepland</span>
@@ -444,47 +446,18 @@
         <span><i class="lijn gereden"></i>gereden</span>
         <span><i class="lijn bocht"></i>kopakkerbocht</span>
         <span><i class="lijn omega"></i>omega-bocht</span>
-        <span><i class="mini-robot">▲</i>robot, kleur = GPS-fix</span>
     </div>
 </div>
 
 <style>
-    .veldkaart { margin-bottom: 20px; }
-    .balk { display: flex; gap: 8px; margin-bottom: 8px; }
-    .balk button { flex: 1; padding: 11px; font-size: 15px; font-weight: bold; border: none; border-radius: 4px; background: #607d8b; color: white; cursor: pointer; }
-    .balk button.aan { background: #00838f; }
-    .balk button:disabled { opacity: 0.5; cursor: default; }
-
-    .kaart { height: 55vh; min-height: 320px; max-height: 640px; border-radius: 8px; border: 1px solid #ccc; background: #cfd8dc; }
-
-    .info { font-size: 14px; color: #444; margin-top: 6px; }
-    .let-op { color: #c62828; font-weight: bold; }
-    .stip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 2px; }
-    .stip.groen { background: #00c853; }
-    .stip.oranje { background: #ff9100; }
-    .stip.rood { background: #d50000; }
-
-    .legenda { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #555; margin-top: 8px; }
-    .legenda span { display: inline-flex; align-items: center; gap: 5px; }
-    /* Op een donker vlakje, zoals op de luchtfoto: wit gestreept zie je anders niet. */
-    .lijn { position: relative; display: inline-block; width: 28px; height: 12px; background: #455a64; border-radius: 3px; }
-    .lijn::after { content: ''; position: absolute; left: 3px; right: 3px; top: 50%; transform: translateY(-50%); border-top: 2px solid; }
+    .veldkaart { display: flex; flex-direction: column; gap: 8px; }
     .lijn.gepland::after { border-top: 2px dashed #ffffff; }
     .lijn.nu::after { border-top: 4px solid #00E5FF; }
     .lijn.gereden::after { border-top: 4px solid #FFEA00; }
     .lijn.bocht::after { border-top: 2px dashed #FF9100; }
     .lijn.omega::after { border-top: 2px dashed #FF1744; }
-    .mini-robot { font-style: normal; color: #00c853; text-shadow: 0 0 2px #000; }
 
     /* Onderstaande elementen maakt Leaflet zelf aan, dus buiten Sveltes scope. */
-    :global(.robot-icoon), :global(.baan-icoon) { background: none; border: none; }
-    :global(.robot-pijl) { width: 32px; height: 32px; transition: transform 0.3s linear; filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)); }
-    :global(.robot-pijl svg) { display: block; }
-    :global(.robot-pijl path) { fill: currentColor; stroke: #ffffff; stroke-width: 1.6; stroke-linejoin: round; }
-    :global(.robot-pijl.groen) { color: #00c853; }
-    :global(.robot-pijl.oranje) { color: #ff9100; }
-    :global(.robot-pijl.rood) { color: #d50000; }
-
     :global(.baan-label) { --kleur: #1565c0; position: relative; width: 26px; height: 26px; }
     :global(.baan-label.nu) { --kleur: #00838f; }
     :global(.baan-label.klaar) { --kleur: #78909c; opacity: 0.85; }

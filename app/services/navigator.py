@@ -223,7 +223,7 @@ class Navigator:
 
             # 5. STUUR HET VOERTUIG AAN
             # De VehicleController handelt het differentieel, smoothing en anti-stall af.
-            self.vehicle.drive(snelheid, final_steering_angle)
+            self.vehicle.drive(snelheid, final_steering_angle, timeout_s=self.vehicle.nav_timeout_s)
             self.status_message = (
                 f"Naar punt {self.current_wp_index + 1}/{len(self.waypoints)}: nog {distance:.1f} m, "
                 f"afwijking {afwijking:+.2f} m" + (f" | {melding}" if melding else "")

@@ -1,0 +1,13 @@
+{
+  "name": "Bruut OpenAgbot",
+  "short_name": "OpenAgbot",
+  "description": "Bediening van de veldrobot",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#14201a",
+  "theme_color": "#14201a",
+  "icons": [
+    { "src": "/icoon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

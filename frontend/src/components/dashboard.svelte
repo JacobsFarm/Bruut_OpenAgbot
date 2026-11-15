@@ -1,11 +1,12 @@
 <script>
-    import { status, motors, fmt, fixInfo } from '../lib/telemetry.js';
+    import { status, motors, fmt, fixInfo, bezigheid } from '../lib/telemetry.js';
 
     $: gps = $status.data;
     $: m = $motors.data;
     $: accu = m?.battery;
     $: links = m?.wheels?.left;
     $: rechts = m?.wheels?.right;
+    $: doet = bezigheid(gps, m);
 
     // De echte grondsnelheid komt van de GPS; de wielen zeggen hoe snel ze
     // draaien. Draaien ze duidelijk sneller dan de robot gaat, dan slipt hij -
@@ -27,14 +28,12 @@
         : 'ongeldig';
 
     function ladingKleur(pct) {
-        if (pct >= 50) return 'groen';
+        if (pct >= 40) return 'groen';
         if (pct >= 20) return 'oranje';
         return 'rood';
     }
 
-    $: missie = gps?.ab_active ? `A-B: ${gps.ab_message}`
-        : gps?.navigator_active ? `Route: ${gps.nav_message}`
-        : 'Geen missie actief';
+    const heeft = (x) => x !== null && x !== undefined;
 
     // Per wiel dezelfde regels, links en rechts naast elkaar.
     const wielRegels = [
@@ -52,32 +51,38 @@
     ];
 </script>
 
-<div class="dashboard">
-    <h2>Dashboard</h2>
+<div class="pagina">
+    <section class="paneel nu {doet.toon}">
+        <h3>Nu</h3>
+        <div class="nu-titel">{doet.titel}</div>
+        {#if doet.tekst}<div class="nu-tekst">{doet.tekst}</div>{/if}
+    </section>
 
-    <div class="raster">
-        <section class="kaart">
+    <div class="raster2">
+        <section class="paneel">
             <h3>Snelheid</h3>
-            <div class="groot">{fmt(gpsKmh, 1)} <span class="eenheid">km/h</span></div>
-            <div class="sub">echte snelheid (GPS)</div>
+            <div class="groot-getal">{fmt(gpsKmh, 1)}<small> km/h</small></div>
+            <div class="klein onder-getal">echte snelheid (GPS)</div>
             <div class="regel"><span>Wielen</span><b>{fmt(wielKmh, 1)} km/h</b></div>
             {#if slip !== null}
                 <div class="regel">
-                    <span>Verschil wielen - GPS</span>
+                    <span>Verschil wielen − GPS</span>
                     <b class:let-op={Math.abs(slip) > 15}>{slip > 0 ? '+' : ''}{fmt(slip, 0)} %</b>
                 </div>
             {/if}
             <div class="regel"><span>Koers</span><b>{fmt(gps?.heading, 0)}°</b></div>
         </section>
 
-        <section class="kaart">
+        <section class="paneel">
             <h3>Accu</h3>
-            <div class="groot">{fmt(accu?.voltage_v, 1)} <span class="eenheid">V</span></div>
-            {#if accu?.soc_pct !== null && accu?.soc_pct !== undefined}
-                <div class="balk"><div class="vulling {ladingKleur(accu.soc_pct)}" style="width: {accu.soc_pct}%"></div></div>
-                <div class="sub">ca. {accu.soc_pct} % geladen (schatting uit de spanning)</div>
+            <div class="groot-getal">
+                {#if heeft(accu?.soc_pct)}{accu.soc_pct}<small> %</small>{:else}{fmt(accu?.voltage_v, 1)}<small> V</small>{/if}
+            </div>
+            {#if heeft(accu?.soc_pct)}
+                <div class="voortgang lading"><div class={ladingKleur(accu.soc_pct)} style="width: {accu.soc_pct}%"></div></div>
+                <div class="klein onder-getal">{fmt(accu.voltage_v, 1)} V · schatting uit de spanning</div>
             {:else}
-                <div class="sub">geen spanning van de VESC's</div>
+                <div class="klein onder-getal">geen spanning van de VESC's</div>
             {/if}
             <div class="regel"><span>Stroom / vermogen</span><b>{fmt(accu?.current_a, 1)} A / {fmt(accu?.power_w, 0)} W</b></div>
             <div class="regel"><span>Verbruikt</span><b>{fmt(accu?.used_ah, 2)} Ah / {fmt(accu?.used_wh, 0)} Wh</b></div>
@@ -86,12 +91,11 @@
                 <span>Netto van {fmt(accu?.capacity_wh, 0)} Wh</span>
                 <b>{fmt(accu?.net_wh, 0)} Wh ({fmt(accu?.used_pct, 0)} %)</b>
             </div>
-            <div class="klein">Verbruik telt vanaf het moment dat de VESC's spanning kregen.</div>
+            <p class="klein voet">Verbruik telt vanaf het moment dat de VESC's spanning kregen.</p>
         </section>
 
-        <section class="kaart">
-            <h3>GNSS (ZED-X20D)</h3>
-            <div class="badge {fix.kleur}">{fix.tekst}</div>
+        <section class="paneel">
+            <h3>GNSS (ZED-X20D) <span class="chip {fix.kleur}">{fix.tekst}</span></h3>
             <div class="regel"><span>Latitude</span><b class="mono">{fmt(gps?.lat, 8)}</b></div>
             <div class="regel"><span>Longitude</span><b class="mono">{fmt(gps?.lon, 8)}</b></div>
             <div class="regel"><span>HDOP / satellieten</span><b>{fmt(gps?.hdop, 2)} / {gps?.sats ?? '–'}</b></div>
@@ -106,20 +110,20 @@
             <div class="regel"><span>Draaisnelheid</span><b>{fmt(gps?.draaisnelheid_dps, 1)} °/s</b></div>
             <div class="regel">
                 <span>Rijrichting / slip</span>
-                <b class:let-op={gps?.sliphoek_deg !== null && gps?.sliphoek_deg !== undefined && Math.abs(gps.sliphoek_deg) > 5}>
-                    {richting}{gps?.sliphoek_deg !== null && gps?.sliphoek_deg !== undefined ? ` · ${fmt(gps.sliphoek_deg, 1)}°` : ''}
+                <b class:let-op={heeft(gps?.sliphoek_deg) && Math.abs(gps.sliphoek_deg) > 5}>
+                    {richting}{heeft(gps?.sliphoek_deg) ? ` · ${fmt(gps.sliphoek_deg, 1)}°` : ''}
                 </b>
             </div>
             <div class="regel">
                 <span>Correcties (NTRIP)</span>
                 <b class:let-op={gnss && gnss.ntrip_status !== 'verbonden'}>
-                    {gnss?.ntrip_status ?? '–'}{gps?.correctie_leeftijd_s !== null && gps?.correctie_leeftijd_s !== undefined ? ` · ${fmt(gps.correctie_leeftijd_s, 1)} s oud` : ''}
+                    {gnss?.ntrip_status ?? '–'}{heeft(gps?.correctie_leeftijd_s) ? ` · ${fmt(gps.correctie_leeftijd_s, 1)} s oud` : ''}
                 </b>
             </div>
             <div class="regel">
-                <span>Antennes (DAHEADING)</span>
+                <span>Antennes</span>
                 <b class:let-op={gps && gps.baseline_m === null}>
-                    {#if gps?.baseline_m !== null && gps?.baseline_m !== undefined}
+                    {#if heeft(gps?.baseline_m)}
                         {fmt(gps.baseline_m, 3)} m · {gps.antenne_hoogteverschil_m >= 0 ? '+' : ''}{fmt(gps.antenne_hoogteverschil_m * 100, 1)} cm · {gps.dah_oplossing}
                     {:else}
                         niet ontvangen ({gnss?.daheading_config ?? '–'})
@@ -129,21 +133,10 @@
             {#if gnss?.ntrip_fout}
                 <div class="melding rood">{gnss.ntrip_fout}</div>
             {/if}
-            <div class="regel"><span>Missie</span><b class="rechts-uitlijnen">{missie}</b></div>
         </section>
 
-        <section class="kaart">
-            <h3>Aandrijving</h3>
-            <div class="regel">
-                <span>CAN ({m?.can?.channel ?? '–'})</span>
-                <b class:let-op={m && !m.can.online}>{m ? (m.can.online ? 'open' : 'dicht') : '–'}</b>
-            </div>
-            <div class="regel"><span>Rijopdracht</span><b>{fmt(m?.drive?.target_kmh, 1)} km/h</b></div>
-            <div class="regel"><span>Stuurhoek</span><b>{fmt(m?.drive?.angle_degrees, 1)}°</b></div>
-            <div class="regel">
-                <span>Bereik</span>
-                <b>{fmt(m?.limits?.min_kmh, 1)} - {fmt(m?.limits?.max_kmh, 1)} km/h</b>
-            </div>
+        <section class="paneel">
+            <h3>Aandrijving en stuur</h3>
             {#if m?.fault}
                 <div class="melding rood">{m.fault}</div>
             {:else if m}
@@ -152,10 +145,24 @@
             {#each m?.warnings ?? [] as waarschuwing}
                 <div class="melding oranje">{waarschuwing}</div>
             {/each}
+            <div class="regel">
+                <span>CAN ({m?.can?.channel ?? '–'})</span>
+                <b class:let-op={m && !m.can.online}>{m ? (m.can.online ? 'open' : 'dicht') : '–'}</b>
+            </div>
+            <div class="regel">
+                <span>Stuur-Arduino</span>
+                <b class:let-op={m?.steering_fault}>{m ? (m.steering_fault ?? 'antwoordt') : '–'}</b>
+            </div>
+            <div class="regel"><span>Rijopdracht</span><b>{fmt(m?.drive?.target_kmh, 1)} km/h</b></div>
+            <div class="regel"><span>Stuurhoek (midden)</span><b>{fmt(m?.drive?.angle_degrees, 1)}°</b></div>
+            <div class="regel">
+                <span>Bereik</span>
+                <b>{fmt(m?.limits?.min_kmh, 1)} – {fmt(m?.limits?.max_kmh, 1)} km/h</b>
+            </div>
         </section>
 
-        <section class="kaart breed">
-            <h3>Achterwielen (VESC)</h3>
+        <details class="paneel breed">
+            <summary>Achterwielen (VESC) <small>{fmt(links?.speed_kmh, 1)} / {fmt(rechts?.speed_kmh, 1)} km/h</small></summary>
             <table>
                 <thead>
                     <tr>
@@ -174,49 +181,31 @@
                     {/each}
                 </tbody>
             </table>
-        </section>
+        </details>
     </div>
 </div>
 
 <style>
-    .dashboard { padding: 15px; }
-    h2 { margin: 0 0 15px; }
-    .raster { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    @media (max-width: 600px) { .raster { grid-template-columns: 1fr; } }
+    .nu { border-left: 6px solid var(--inkt2); }
+    .nu.groen { border-left-color: var(--groen); }
+    .nu.blauw { border-left-color: var(--blauw); }
+    .nu.oranje { border-left-color: var(--oranje); }
+    .nu.rood { border-left-color: var(--rood); background: var(--rood-vlak); }
+    .nu-titel { font-size: 22px; font-weight: 700; line-height: 1.2; }
+    .nu-tekst { font-size: 15px; color: var(--inkt2); margin-top: 3px; overflow-wrap: anywhere; }
+    .nu.rood .nu-tekst { color: var(--inkt); }
 
-    .kaart { background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 15px; min-width: 0; }
-    .kaart.breed { grid-column: 1 / -1; }
-    h3 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #666; }
+    .onder-getal { margin: 2px 0 10px; }
+    .lading { margin-top: 8px; }
+    .lading .groen { background: var(--groen); }
+    .lading .oranje { background: var(--oranje); }
+    .lading .rood { background: var(--rood); }
+    .voet { margin-top: 8px; }
+    .melding { margin-bottom: 8px; }
+    .regel + .melding { margin-top: 8px; }
 
-    .groot { font-size: 44px; font-weight: 800; line-height: 1.1; color: #222; }
-    .eenheid { font-size: 20px; font-weight: 600; color: #777; }
-    .sub { color: #666; font-size: 13px; margin: 4px 0 10px; }
-    .klein { color: #888; font-size: 12px; margin-top: 8px; }
-
-    .regel { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid #e3e3e3; font-size: 15px; }
-    .regel b { text-align: right; }
-    .rechts-uitlijnen { overflow-wrap: anywhere; }
-    .mono { font-family: monospace; }
-    .let-op { color: #c62828; }
-
-    .balk { background: #ddd; height: 14px; border-radius: 7px; overflow: hidden; }
-    .vulling { height: 100%; transition: width 0.5s; }
-    .vulling.groen { background: #43a047; }
-    .vulling.oranje { background: #fb8c00; }
-    .vulling.rood { background: #e53935; }
-
-    .badge { display: inline-block; padding: 6px 12px; border-radius: 4px; font-weight: bold; color: white; margin-bottom: 8px; }
-    .badge.groen { background: #43a047; }
-    .badge.oranje { background: #fb8c00; }
-    .badge.rood { background: #e53935; }
-
-    .melding { padding: 8px 10px; border-radius: 4px; margin-top: 8px; font-size: 14px; }
-    .melding.groen { background: #e8f5e9; color: #2e7d32; }
-    .melding.oranje { background: #fff3e0; color: #e65100; }
-    .melding.rood { background: #ffebee; color: #c62828; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 15px; }
-    th, td { padding: 7px 6px; border-top: 1px solid #e3e3e3; text-align: right; }
-    th:first-child, td:first-child { text-align: left; color: #555; }
-    thead th { border-top: none; }
+    table { width: 100%; border-collapse: collapse; font-size: 14.5px; font-variant-numeric: tabular-nums; }
+    th, td { padding: 7px 4px; border-top: 1px solid var(--lijn); text-align: right; }
+    th:first-child, td:first-child { text-align: left; color: var(--inkt2); }
+    thead th { border-top: none; font-weight: 650; }
 </style>

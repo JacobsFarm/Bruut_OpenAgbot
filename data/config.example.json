@@ -22,7 +22,10 @@
     "decel_mps2": 0.8,
 
     "_comment_dodemansknop": "Handmatig rijden is een dodemansknop: de webinterface herhaalt het commando een paar keer per seconde zolang je rijdt. Komt er manual_timeout_s lang niets binnen (wifi weg, telefoon op slot, ander tabblad), dan remt hij af tot stilstand.",
-    "manual_timeout_s": 1.5
+    "manual_timeout_s": 1.5,
+
+    "_comment_watchdog": "Dezelfde dodemansknop voor de navigators (waypoints, AB-lijn, veldmissie): ze sturen op het ritme van de GNSS (25 Hz). Komt er nav_timeout_s lang geen rijcommando (een navigator die hangt zonder te crashen: schijf vol, deadlock), dan remt de robot af in plaats van op zijn laatste commando door te rijden.",
+    "nav_timeout_s": 1.0
   },
   "battery": {
     "_comment": "Alleen voor het dashboard en de ritlog. EGO 56 V, 5 Ah = 14S2P (VESC/README.md). De lading is een schatting uit de spanning; internal_resistance_ohm corrigeert de spanningsval onder stroom (zelf ijken: spanning in rust min spanning onder een bekende stroom, gedeeld door die stroom). Het verbruik komt uit de tellers van de VESC's, die op nul beginnen zodra de VESC's spanning krijgen.",
@@ -45,7 +48,11 @@
 
     "_comment_verkeer": "Onderdrukt overbodig serieel verkeer: alleen sturen bij een verandering van minstens min_change_degrees, met elke resend_interval_sec een herhaling als levensteken.",
     "min_change_degrees": 0.1,
-    "resend_interval_sec": 1.0
+    "resend_interval_sec": 1.0,
+
+    "_comment_bewaking": "Zonder stuur niet rijden. Antwoordt de stuur-Arduino fault_after_failures commando's achter elkaar niet (ca. 1 s), of is hij niet verbonden, dan staat de aandrijving stil en stopt een lopende missie, met de melding in de webinterface. Antwoordt hij weer, dan is de storing vanzelf weg. fault_stops_drive false = toch rijden (bv. de aandrijving testen op bokken zonder Arduino).",
+    "fault_stops_drive": true,
+    "fault_after_failures": 3
   },
   "vesc": {
     "_comment_bus": "Twee VESC Classic 100V op CAN, zie VESC/README_can.md. Op de Orin Nano is can0 de eigen CAN-controller van de Jetson (mttcan); de InnoMaker USB2CAN verschijnt als can1 (setup/information/innomaker_usb2can_jetson_setup.json). De ID's zijn zoals getest met VESC/vesc_slider_2_wheels.py. Voor een slcan-adapter: can_interface 'slcan' en het tty-pad als can_channel.",
@@ -137,6 +144,9 @@
     "lane_capture_xte_m": 0.05,
     "lane_capture_heading_deg": 3.0,
     "lane_capture_timeout_s": 20.0,
+    "_comment_van_de_baan": "Vangnet voor de AB-missie. Heeft de robot de baan eenmaal te pakken (binnen de helft van max_cross_track_m) en raakt hij daarna verder dan max_cross_track_m ervan af, dan stopt de missie in plaats van naast de baan door te rijden: een stuurmotor die stappen verliest, een voorwiel dat vastzit, wegglijden op een talud. In een kopakkerbocht geldt max_turn_deviation_m tot het bochtpad. 0 = uit. (De veldmissie heeft hiervoor missie.max_afwijking_m.)",
+    "max_cross_track_m": 1.0,
+    "max_turn_deviation_m": 2.0,
 
     "_comment_regelaar": "Stuurregeling op rechte stukken (AB-banen en lijnstukken tussen waypoints). 'stanley' stuurt op de koersfout en de afwijking van de vooras, en dempt met de draaisnelheid uit THS; dat kan alleen met de echte neus-heading van de dubbele antenne en trekt strak op de lijn. 'pure_pursuit' stuurt op een punt lookahead_distance_m verderop: soepeler, maar met een kleine blijvende afwijking. In de kopakkerbochten wordt altijd pure pursuit gebruikt. De regellus loopt op het ritme van de GNSS (25 Hz).",
     "line_controller": "stanley",

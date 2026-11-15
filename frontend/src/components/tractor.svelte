@@ -1,7 +1,10 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
-    import { motors, fmt, grensOmhoog, grensOmlaag } from '../lib/telemetry.js';
+    import { motors, status, noodstop as stopRobot, fmt, grensOmhoog, grensOmlaag } from '../lib/telemetry.js';
     import Veldkaart from './veldkaart.svelte';
+
+    // False zolang dit tabblad niet in beeld is (het blijft bestaan, zodat je keuzes blijven staan).
+    export let actief = true;
 
     // Snelheidsbereik van de aandrijving (min/max eRPM in de VESC-config).
     // Daarbuiten rijdt hij toch op de grens, dus de schuiven lopen niet verder.
@@ -37,9 +40,12 @@
     let lat_b = null;
     let lon_b = null;
 
-    // Live voortgang tijdens de missie
-    let missieActief = false;
-    let liveBericht = "";
+    // Live voortgang tijdens de missie, uit de gedeelde status
+    $: s = $status.data;
+    $: missieActief = s?.ab_active ?? false;
+    $: liveBericht = missieActief ? s.ab_message : "";
+    // Waarom de vorige missie stopte ("Gestopt - 1.20 m naast baan 3"), tot je een nieuwe start.
+    $: stopReden = !missieActief && s?.ab_message?.startsWith('Gestopt -') ? s.ab_message : "";
     let timer = null;
 
     // Voorbeeld op de kaart: wat hij met deze instellingen gaat rijden. Alleen
@@ -50,31 +56,18 @@
     let voorbeeldNodig = false;
     let voorbeeldFout = "";
     let voorbeeldTimer = null;
-    let statusTeller = 0;
 
     onMount(async () => {
         await haalLijnenOp();
-        timer = setInterval(haalStatusOp, 1000);
+        // Draait de robot intussen, of komt de GPS-fix binnen, dan kan de rijrichting
+        // van de eerste baan omslaan: het voorbeeld af en toe verversen.
+        timer = setInterval(() => { if (actief && voorbeeldNodig && !missieActief) haalVoorbeeldOp(); }, 3000);
     });
 
     onDestroy(() => {
         if (timer) clearInterval(timer);
         clearTimeout(voorbeeldTimer);
     });
-
-    async function haalStatusOp() {
-        try {
-            const res = await fetch('/api/status');
-            const s = await res.json();
-            missieActief = s.ab_active;
-            liveBericht = s.ab_active
-                ? `${s.ab_state} | ${s.ab_message} | baan ${s.ab_baan_nr}/${s.ab_totaal_banen}`
-                : "";
-            // Draait de robot intussen, of komt de GPS-fix binnen, dan kan de
-            // rijrichting van de eerste baan omslaan: voorbeeld af en toe verversen.
-            if (voorbeeldNodig && !s.ab_active && ++statusTeller % 3 === 0) haalVoorbeeldOp();
-        } catch(e) {}
-    }
 
     // Hetzelfde bericht voor de start en voor het voorbeeld op de kaart, zodat
     // de kaart precies laat zien wat er na 'Start' gereden wordt.
@@ -294,200 +287,160 @@
     }
 
     async function noodstop() {
-        try {
-            await fetch('/api/stop', { method: 'POST' });
-            statusBericht = "Gestopt (Noodstop)";
-        } catch(e) {}
+        statusBericht = (await stopRobot()) ? "Gestopt" : "Stoppen mislukt: de robot is niet bereikt!";
     }
 </script>
 
-<div class="tractor-container">
-    <h2>Landbouw (A-B Lijnen)</h2>
-    <div class="status-box">{statusBericht}</div>
+<div class="pagina">
     {#if missieActief}
-        <div class="live-box">{liveBericht}</div>
+        <div class="melding groen live">{liveBericht}</div>
+    {:else if stopReden}
+        <div class="melding rood">{stopReden}</div>
+    {:else}
+        <div class="melding blauw">{statusBericht}</div>
     {/if}
 
-    <Veldkaart {voorbeeld} />
+    <Veldkaart {voorbeeld} {actief} />
     {#if voorbeeldFout}
-        <p class="hint">Kaart: {voorbeeldFout}</p>
-    {/if}
-    {#if missieActief}
-        <!-- Tijdens de missie kijk je naar de kaart: de noodstop hoort daar direct onder. -->
-        <button class="btn-stop btn-stop-kaart" on:click={noodstop}>STOP ALLES</button>
+        <p class="klein">Kaart: {voorbeeldFout}</p>
     {/if}
 
-    <div class="grid-layout">
-        <div class="config-box">
-            <h3>1. Lijn Selecteren</h3>
-            <select on:change={selecteerLijn} bind:value={geselecteerdeLijnIndex}>
-                <option value="-1">-- Kies een opgeslagen lijn --</option>
+    <!-- Starten en stoppen direct onder de kaart: daar kijk je naar. -->
+    {#if missieActief}
+        <button class="gevaar groot vol" on:click={noodstop}>Stop missie</button>
+    {:else}
+        <button class="primair groot vol" on:click={startABMissie} disabled={!lat_a || !lat_b}>
+            {gekozenLijn ? 'Start: ' + gekozenLijn.veldnaam : 'Kies eerst een lijn'}
+        </button>
+    {/if}
+
+    <details class="paneel" open>
+        <summary>1. Lijn <small>{gekozenLijn ? gekozenLijn.veldnaam : 'geen gekozen'}</small></summary>
+        <div class="veld">
+            <select on:change={selecteerLijn} bind:value={geselecteerdeLijnIndex} disabled={missieActief} aria-label="Opgeslagen A-B lijn">
+                <option value="-1">Kies een opgeslagen lijn</option>
                 {#each opgeslagenLijnen as lijn, i}
                     <option value={i}>{lijn.veldnaam}</option>
                 {/each}
             </select>
-            <button class="btn-refresh" on:click={haalLijnenOp}>Herlaad JSON Lijst</button>
-            {#if baanVolgorde.length}
-                <p class="hint">
-                    Werkvolgorde: <b>{baanVolgorde.join(' - ')}</b>
-                    {#if aangepast}<span class="gewijzigd">aangepast</span>{/if}<br>
-                    Kopakker {kopakkerExtra} m doorrijden, veld ligt {kant} van de lijn.
-                </p>
-                {#if aangepast}
-                    <button class="btn-herstel" on:click={herstelUitJson}>
-                        Terug naar de waardes uit de JSON
-                    </button>
-                {/if}
-            {:else}
-                <p class="hint">
-                    Geen missieplan in deze lijn. Maak er een met
-                    <code>Single_script_code/AB_mission_maker.py</code>, dan komen
-                    werkbreedte, baanlengte en werkvolgorde hier vanzelf te staan.
-                </p>
+        </div>
+        <button class="vol" on:click={haalLijnenOp}>Lijst opnieuw laden</button>
+        {#if baanVolgorde.length}
+            <p class="klein uitleg">
+                Werkvolgorde: <b>{baanVolgorde.join(' - ')}</b>
+                {#if aangepast}<span class="chip oranje">aangepast</span>{/if}<br>
+                Kopakker {kopakkerExtra} m doorrijden, veld ligt {kant} van de lijn.
+            </p>
+            {#if aangepast}
+                <button class="oranje vol" on:click={herstelUitJson}>Terug naar de waardes uit het bestand</button>
             {/if}
-        </div>
-
-        <div class="config-box">
-            <h3>2. Werk Instellingen</h3>
-            <p class="hint">
-                De baanindeling, alleen te zetten <b>voor</b> de start. Deze
-                waardes komen uit de JSON en mag je hier gerust verzetten: ze
-                gelden alleen voor deze missie, het bestand op de robot verandert
-                niet. Het invulvakje naast de schuif is er voor exacte waardes en
-                voor buiten het schuifbereik.
+        {:else}
+            <p class="klein uitleg">
+                Geen missieplan in deze lijn. Maak er een met
+                <code>Single_script_code/AB_mission_maker.py</code>, dan komen
+                werkbreedte, baanlengte en werkvolgorde hier vanzelf te staan.
             </p>
+        {/if}
+    </details>
 
-            <div class="slider-group">
-                <label for="werkbreedte">Werkbreedte (m)</label>
-                <div class="regel">
-                    <input id="werkbreedte" type="range" min="1.0" max="10.0" step="0.1"
-                           bind:value={werkbreedte} on:change={gewijzigd}>
-                    <input class="getal" type="number" min="0.1" step="0.1"
-                           bind:value={werkbreedte} on:change={gewijzigd}>
-                </div>
-            </div>
+    <details class="paneel">
+        <summary>2. Banen <small>{aantalBanen} x {werkbreedte} m, {fmt(veldlengte, 0)} m lang</small></summary>
+        <p class="klein uitleg boven">
+            De baanindeling, alleen te zetten <b>voor</b> de start. Wat je hier verzet geldt
+            alleen voor deze missie; het bestand op de robot verandert niet.
+        </p>
 
-            <div class="slider-group">
-                <label for="veldlengte">Baanlengte / veldlengte (m)</label>
-                <div class="regel">
-                    <input id="veldlengte" type="range" min="10" max="400" step="1"
-                           bind:value={veldlengte} on:change={gewijzigd}>
-                    <input class="getal" type="number" min="1" step="0.1"
-                           bind:value={veldlengte} on:change={gewijzigd}>
-                </div>
-            </div>
-
-            <div class="slider-group">
-                <label for="aantalBanen">Aantal banen</label>
-                <div class="regel">
-                    <input id="aantalBanen" type="range" min="1" max="60" step="1"
-                           bind:value={aantalBanen} on:change={hertelVolgorde}>
-                    <input class="getal" type="number" min="1" step="1"
-                           bind:value={aantalBanen} on:change={hertelVolgorde}>
-                </div>
-            </div>
-
-            <div class="slider-group">
-                <label for="overslaan">
-                    Banen overslaan (zijsprong {zijsprong} m)
-                </label>
-                <div class="regel">
-                    <input id="overslaan" type="range" min="0" max="4" step="1"
-                           bind:value={banenOverslaan} on:change={hertelVolgorde}>
-                    <input class="getal" type="number" min="0" max="9" step="1"
-                           bind:value={banenOverslaan} on:change={hertelVolgorde}>
-                </div>
-            </div>
-
-            <div class="slider-group">
-                <label for="kopakker">Kopakker doorrijden (m)</label>
-                <div class="regel">
-                    <input id="kopakker" type="range" min="0.0" max="15.0" step="0.5"
-                           bind:value={kopakkerExtra} on:change={gewijzigd}>
-                    <input class="getal" type="number" min="0" step="0.5"
-                           bind:value={kopakkerExtra} on:change={gewijzigd}>
-                </div>
-            </div>
-
-            <div class="slider-group">
-                <label for="kant">Veld ligt ... van de A-B lijn</label>
-                <select id="kant" bind:value={kant} on:change={gewijzigd}>
-                    <option value="rechts">rechts van de lijn</option>
-                    <option value="links">links van de lijn</option>
-                </select>
+        <div class="veld">
+            <label for="werkbreedte">Werkbreedte (m)</label>
+            <div class="rij">
+                <input id="werkbreedte" type="range" min="1.0" max="10.0" step="0.1"
+                       bind:value={werkbreedte} on:change={gewijzigd}>
+                <input type="number" inputmode="decimal" min="0.1" step="0.1" aria-label="Werkbreedte in meters"
+                       bind:value={werkbreedte} on:change={gewijzigd}>
             </div>
         </div>
 
-        <div class="config-box">
-            <h3>3. Rijden &amp; lijnvolging (live)</h3>
-            <p class="hint">
-                Deze drie werken direct tijdens een lopende missie - je hoeft niet
-                te stoppen. De baanindeling hierboven kan dat niet: die ligt bij
-                het starten vast.
-            </p>
-
-            <div class="slider-group">
-                <label for="snelheid">Werksnelheid (km/h, {fmt(minKmh, 1)} - {fmt(maxKmh, 1)})</label>
-                <div class="regel">
-                    <input id="snelheid" type="range" min={minKmh} max={maxKmh} step="0.1"
-                           bind:value={snelheid} on:change={updateLijnvolging}>
-                    <input class="getal" type="number" min="0" step="0.1"
-                           bind:value={snelheid} on:change={updateLijnvolging}>
-                </div>
-            </div>
-
-            <div class="slider-group">
-                <label>
-                    Lookahead (strak ⟷ soepel): {lookahead.toFixed(1)} m
-                    <input type="range" min="0.5" max="6.0" step="0.1" bind:value={lookahead} on:change={updateLijnvolging}>
-                </label>
-            </div>
-
-            <div class="slider-group">
-                <label>
-                    Bochtsnelheid: {bochtSnelheid.toFixed(1)} km/h
-                    <input type="range" min={minKmh} max={maxKmh} step="0.1" bind:value={bochtSnelheid} on:change={updateLijnvolging}>
-                </label>
+        <div class="veld">
+            <label for="veldlengte">Baanlengte (m)</label>
+            <div class="rij">
+                <input id="veldlengte" type="range" min="10" max="400" step="1"
+                       bind:value={veldlengte} on:change={gewijzigd}>
+                <input type="number" inputmode="decimal" min="1" step="0.1" aria-label="Baanlengte in meters"
+                       bind:value={veldlengte} on:change={gewijzigd}>
             </div>
         </div>
-    </div>
 
-    <div class="actions">
-        <button class="btn-start" on:click={startABMissie}>Start A-B Missie</button>
-        <button class="btn-stop" on:click={noodstop}>STOP ALLES</button>
-    </div>
+        <div class="veld">
+            <label for="aantalBanen">Aantal banen</label>
+            <div class="rij">
+                <input id="aantalBanen" type="range" min="1" max="60" step="1"
+                       bind:value={aantalBanen} on:change={hertelVolgorde}>
+                <input type="number" inputmode="numeric" min="1" step="1" aria-label="Aantal banen"
+                       bind:value={aantalBanen} on:change={hertelVolgorde}>
+            </div>
+        </div>
+
+        <div class="veld">
+            <label for="overslaan">Banen overslaan <span class="waarde">zijsprong {zijsprong} m</span></label>
+            <div class="rij">
+                <input id="overslaan" type="range" min="0" max="4" step="1"
+                       bind:value={banenOverslaan} on:change={hertelVolgorde}>
+                <input type="number" inputmode="numeric" min="0" max="9" step="1" aria-label="Banen overslaan"
+                       bind:value={banenOverslaan} on:change={hertelVolgorde}>
+            </div>
+        </div>
+
+        <div class="veld">
+            <label for="kopakker">Kopakker doorrijden (m)</label>
+            <div class="rij">
+                <input id="kopakker" type="range" min="0.0" max="15.0" step="0.5"
+                       bind:value={kopakkerExtra} on:change={gewijzigd}>
+                <input type="number" inputmode="decimal" min="0" step="0.5" aria-label="Kopakker doorrijden in meters"
+                       bind:value={kopakkerExtra} on:change={gewijzigd}>
+            </div>
+        </div>
+
+        <div class="veld">
+            <label for="kant">Het veld ligt</label>
+            <select id="kant" bind:value={kant} on:change={gewijzigd}>
+                <option value="rechts">rechts van de lijn A → B</option>
+                <option value="links">links van de lijn A → B</option>
+            </select>
+        </div>
+    </details>
+
+    <details class="paneel" open={missieActief}>
+        <summary>3. Rijden <small>{fmt(snelheid, 1)} km/h, bocht {fmt(bochtSnelheid, 1)} km/h</small></summary>
+        <p class="klein uitleg boven">
+            Deze drie werken direct, ook tijdens een lopende missie.
+        </p>
+
+        <div class="veld">
+            <label for="snelheid">Werksnelheid <span class="waarde">{fmt(minKmh, 1)} – {fmt(maxKmh, 1)} km/h</span></label>
+            <div class="rij">
+                <input id="snelheid" type="range" min={minKmh} max={maxKmh} step="0.1"
+                       bind:value={snelheid} on:change={updateLijnvolging}>
+                <input type="number" inputmode="decimal" min="0" step="0.1" aria-label="Werksnelheid in km/h"
+                       bind:value={snelheid} on:change={updateLijnvolging}>
+            </div>
+        </div>
+
+        <div class="veld">
+            <label for="bochtsnelheid">Bochtsnelheid <span class="waarde">{bochtSnelheid.toFixed(1)} km/h</span></label>
+            <input id="bochtsnelheid" type="range" min={minKmh} max={maxKmh} step="0.1" bind:value={bochtSnelheid} on:change={updateLijnvolging}>
+        </div>
+
+        <div class="veld">
+            <label for="lookahead">Lookahead <span class="waarde">{lookahead.toFixed(1)} m (alleen bij pure pursuit)</span></label>
+            <input id="lookahead" type="range" min="0.5" max="6.0" step="0.1" bind:value={lookahead} on:change={updateLijnvolging}>
+        </div>
+    </details>
 </div>
 
 <style>
-    .tractor-container { padding: 15px; font-family: sans-serif; }
-    .status-box { background: #e3f2fd; color: #1565c0; padding: 15px; border-radius: 4px; font-weight: bold; text-align: center; margin-bottom: 20px; font-size: 18px; }
-    .live-box { background: #ede7f6; color: #4527a0; padding: 12px; border-radius: 4px; text-align: center; margin: -10px 0 20px; font-size: 15px; font-family: monospace; }
-    code { background: #eceff1; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
-    .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-    @media (max-width: 600px) { .grid-layout { grid-template-columns: 1fr; } }
-    
-    .config-box { background: #f5f5f5; padding: 20px; border-radius: 8px; border: 1px solid #ddd; }
-    h3 { margin-top: 0; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 15px; }
-    
-    select { width: 100%; padding: 15px; font-size: 16px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #ccc; background: white; }
-    .btn-refresh { width: 100%; padding: 12px; background: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    
-    .hint { font-size: 13px; color: #666; margin-top: -5px; margin-bottom: 15px; }
-    .slider-group { margin-bottom: 20px; }
-    label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
-    input[type="range"] { width: 100%; height: 30px; cursor: pointer; }
-
-    /* Schuif plus invulvakje naast elkaar: de schuif om snel te zoeken, het
-       vakje om een exacte waarde in te tikken of buiten het bereik te gaan. */
-    .regel { display: flex; align-items: center; gap: 10px; }
-    .regel input[type="range"] { flex: 1; min-width: 0; }
-    .getal { width: 84px; padding: 8px; font-size: 15px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
-    .gewijzigd { background: #ffe082; color: #6d4c00; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
-    .btn-herstel { width: 100%; padding: 10px; background: #ff8f00; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 8px; }
-    
-    .actions { display: flex; flex-direction: column; gap: 15px; }
-    .btn-start, .btn-stop { padding: 20px; font-size: 20px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
-    .btn-start { background: #4caf50; }
-    .btn-stop { background: #d32f2f; }
-    .btn-stop-kaart { width: 100%; margin: -8px 0 20px; }
+    .live { font-variant-numeric: tabular-nums; }
+    .uitleg { margin-top: 10px; }
+    .uitleg.boven { margin: 0 0 12px; }
+    .uitleg + button { margin-top: 10px; }
+    code { background: var(--vlak2); padding: 1px 4px; border-radius: 4px; font-size: 12.5px; overflow-wrap: anywhere; }
 </style>

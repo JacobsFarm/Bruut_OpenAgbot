@@ -52,6 +52,14 @@ class VehicleController:
         self.decel_mps2 = vehicle_cfg.get("decel_mps2", 0.8)
         # Dodemansknop voor handbediening, zie drive().
         self.manual_timeout_s = vehicle_cfg.get("manual_timeout_s", 1.5)
+        # Dezelfde dodemansknop voor de navigators: ze sturen op het ritme van
+        # de GNSS (25 Hz). Blijft een navigator hangen (schijf vol, deadlock)
+        # zonder te crashen, dan remt de robot na deze tijd af in plaats van
+        # op zijn laatste commando door te rijden.
+        self.nav_timeout_s = vehicle_cfg.get("nav_timeout_s", 1.0)
+        # Zonder stuur niet rijden (stuur-Arduino stil of niet verbonden).
+        # False = toch rijden, bv. om de aandrijving op bokken te testen.
+        self.steering_fault_stops = bool(config.get("steering", {}).get("fault_stops_drive", True))
 
         # 4. Doel (gezet door drive()) en wat de regellus nu werkelijk vraagt,
         #    beide als snelheid van het midden van de achteras in m/s. Het doel
@@ -132,9 +140,23 @@ class VehicleController:
         self.logger.warning("VOERTUIG NOODSTOP GEACTIVEERD.")
 
     @property
+    def steering_fault(self):
+        """Waarom er niet gestuurd kan worden (stuur-Arduino stil of niet verbonden), of None."""
+        return self.stepper_steering.fault
+
+    @property
     def drive_fault(self):
-        """Waarom de aandrijving niet rijdt (CAN weg, VESC-fout, stall), of None."""
-        return self.motor_controller.fault
+        """
+        Waarom er niet gereden wordt, of None: de aandrijving (CAN weg,
+        VESC-fout, stall) of het stuur. Een robot die niet kan sturen mag ook
+        niet rijden; de navigators beeindigen hierop hun missie.
+        """
+        fout = self.motor_controller.fault
+        if fout is None and self.steering_fault_stops:
+            stuur = self.stepper_steering.fault
+            if stuur is not None:
+                fout = f"stuur: {stuur}"
+        return fout
 
     @property
     def blokkade(self):
@@ -260,18 +282,20 @@ class VehicleController:
         snapshot = self._target
         target, angle, deadline = snapshot
 
-        # Geblokkeerd (verbinding weg, VESC-fout, vastgelopen wiel): stilstaan
-        # en het doel vergeten. Na herstel rijdt hij pas weer op een nieuw
-        # commando, niet vanzelf op het laatste.
-        if motors.fault is not None:
+        # Geblokkeerd (verbinding weg, VESC-fout, vastgelopen wiel, stuur
+        # antwoordt niet): stilstaan en het doel vergeten. Na herstel rijdt
+        # hij pas weer op een nieuw commando, niet vanzelf op het laatste.
+        if self.drive_fault is not None:
             self._speed = 0.0
             self._forget(snapshot)
             motors.command(0, 0, dt)
             return
 
-        # Dodemansknop: de handbediening is stil gevallen.
+        # Dodemansknop: de handbediening is stil gevallen, of een navigator
+        # stuurt niet meer.
         if deadline is not None and time.monotonic() > deadline:
-            self.logger.warning("Handbediening: geen commando meer ontvangen, afremmen tot stilstand.")
+            if target != 0.0:
+                self.logger.warning("Geen rijcommando meer ontvangen (dodemansknop): afremmen tot stilstand.")
             self._forget(snapshot)
             target = 0.0
 
@@ -359,6 +383,11 @@ class VehicleController:
             "deadman_active": deadline is not None,
             "geofence": self._blokkade,
         }
+        # Het stuur hoort bij 'waarom rijdt hij niet': zelfde veld als een
+        # VESC-fout, zodat de webinterface het op elk tabblad laat zien.
+        status["steering_fault"] = self.steering_fault
+        if status["fault"] is None:
+            status["fault"] = self.drive_fault
         return status
 
     def log_snapshot(self):

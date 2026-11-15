@@ -5,7 +5,10 @@
     import { onMount, onDestroy } from 'svelte';
     import L from 'leaflet';
     import 'leaflet/dist/leaflet.css';
-    import { fmt, fixInfo, postJson } from '../lib/telemetry.js';
+    import { fmt, fixInfo, postJson, noodstop } from '../lib/telemetry.js';
+
+    // False zolang dit tabblad niet in beeld is (het blijft bestaan, zodat de kaart en je keuze blijven staan).
+    export let actief = true;
 
     const POLL_MS = 300;
     const ONDERGRONDEN = {
@@ -69,9 +72,10 @@
     $: gf = live?.geofence;
     $: heeftPositie = !!(pos && pos.lat && pos.lon);
     $: fix = fixInfo(pos?.fix);
-    $: actief = m?.actief ?? false;
+    $: rijdt = m?.actief ?? false;
+    $: if (kaart && actief) setTimeout(() => kaart?.invalidateSize(), 0);
     $: info = missies.find((x) => x.naam === gekozen);
-    $: hervatbaar = !actief && gekozen && voortgang[gekozen];
+    $: hervatbaar = !rijdt && gekozen && voortgang[gekozen];
     $: if (kaart && gekozen !== getekendeMissie) tekenMissie(gekozen);
 
     onMount(() => {
@@ -129,7 +133,7 @@
         } catch (e) {
             verbonden = false;
         }
-        if (bezig) timer = setTimeout(tik, POLL_MS);
+        if (bezig) timer = setTimeout(tik, actief ? POLL_MS : 2000);
     }
 
     function verwerk(data) {
@@ -360,7 +364,8 @@
     }
 
     async function stop() {
-        try { await postJson('/api/missie/stop'); } catch (e) {}
+        // De noodstop stopt de missie net zo (de voortgang blijft bewaard) en probeert het vaker.
+        if (!(await noodstop())) melding = 'Stoppen mislukt: de robot is niet bereikt!';
         setTimeout(haalMissies, 500);
     }
 
@@ -464,65 +469,140 @@
         geplaatst = true;
     }
 
+    const statusKleur = { RIJDEN: 'groen', AANLOOP: 'blauw', KLAAR: 'groen', FOUT: 'rood',
+        WACHT_OP_GNSS: 'oranje', WACHT_OP_VRIJGAVE: 'oranje' };
     const tijd = (min) => (min == null ? '–' : min >= 60 ? `${Math.floor(min / 60)} u ${Math.round(min % 60)} min` : `${Math.round(min)} min`);
 </script>
 
-<div class="missie">
+<div class="pagina">
+    <!-- Kaart -->
+    <div class="kaartbalk">
+        <button class:aan={volgen} on:click={wisselVolgen} disabled={!heeftPositie}>{volgen ? 'Volgt de robot' : 'Volg robot'}</button>
+        <button on:click={() => tekenMissie(gekozen)} disabled={!gekozen}>Hele missie</button>
+        <button on:click={heleKaart} disabled={!veiligheidskaart}>Hele kaart</button>
+    </div>
+    <div class="kaartvlak" bind:this={kaartDiv}></div>
+    <div class="klein">
+        {#if !verbonden}
+            <span class="let-op">Geen verbinding met de robot</span>
+        {:else if heeftPositie}
+            <span class="stip {fix.kleur}"></span> {fix.tekst} · {fmt(pos.speed_kmh, 1)} km/h · koers {fmt(pos.heading, 0)}°
+        {:else}
+            <span class="let-op">Nog geen GPS-positie van de robot</span>
+        {/if}
+    </div>
+
+    <!-- Missie -->
+    <section class="paneel">
+        <h3>Missie
+            {#if m?.naam && (rijdt || m.state !== 'IDLE')}<span class="chip {statusKleur[m.state] ?? ''}">{m.state.replaceAll('_', ' ').toLowerCase()}</span>{/if}
+        </h3>
+
+        {#if m?.naam && m.naam === gekozen && m.totaal_m}
+            <div class="voortgang"><div style="width:{m.procent}%"></div></div>
+            <div class="klein stand">
+                {fmt(m.s_m, 0)} van {fmt(m.totaal_m, 0)} m ({fmt(m.procent, 0)}%) · stuk {m.segment + 1}/{m.segmenten}: <b>{m.segment_label}</b>
+                · nog {tijd(m.resterend_min)}
+                {#if rijdt} · afwijking {fmt(m.afwijking_m * 100, 0)} cm · werktuig <b>{m.werktuig_omlaag ? 'OMLAAG' : 'omhoog'}</b>{/if}
+            </div>
+            <div class="melding {m.state === 'FOUT' ? 'rood' : m.state?.startsWith('WACHT') ? 'oranje' : ''}">{m.bericht}</div>
+        {/if}
+
+        <div class="knoppen start">
+            {#if rijdt}
+                {#if m.state === 'WACHT_OP_VRIJGAVE'}
+                    <button class="primair groot" on:click={vrijgeven}>Vrijgeven: oversteken</button>
+                {/if}
+                <button class="gevaar groot" on:click={stop}>Stop missie</button>
+            {:else}
+                <button class="primair groot" on:click={() => start(false)} disabled={!info || info.fout || info.afgekeurd}>Start missie</button>
+                {#if hervatbaar}
+                    <button class="blauw groot" on:click={() => start(true)}>Hervat op {fmt(voortgang[gekozen].s_m, 0)} m</button>
+                {/if}
+            {/if}
+        </div>
+        {#if melding}<div class="melding rood">{melding}</div>{/if}
+
+        <div class="veld">
+            <select bind:value={gekozen} disabled={rijdt} aria-label="Missie op de robot">
+                {#if !missies.length}<option value="">geen missies op de robot</option>{/if}
+                {#each missies as x}
+                    <option value={x.naam}>{x.naam}{x.velden?.length ? ` (${x.velden.join(', ')})` : ''}</option>
+                {/each}
+            </select>
+        </div>
+        {#if info}
+            {#if info.fout}
+                <div class="melding rood">Bestand onleesbaar: {info.fout}</div>
+            {:else}
+                <div class="klein stand">
+                    {info.soort === 'boerderij' ? 'Boerderijmissie' : 'Veldmissie'} · {info.segmenten} stukken
+                    {#if info.lengte_m} · {fmt(info.lengte_m / 1000, 2)} km{/if}
+                    {#if info.tijd_min} · {tijd(info.tijd_min)}{/if}
+                    {#if info.werkbreedte_m} · werkbreedte {info.werkbreedte_m} m{/if}
+                    {#if info.gemaakt} · gemaakt {info.gemaakt.replace('T', ' ')}{/if}
+                    {#if !info.geofence} · zonder eigen geofence{/if}
+                </div>
+                {#if info.afgekeurd}<div class="melding rood">Niet te rijden: {info.afgekeurd}.</div>{/if}
+            {/if}
+        {/if}
+
+        <div class="veld">
+            <label for="missie-max">Maximale snelheid <span class="waarde">{maxKmh ? `${fmt(maxKmh, 1)} km/h` : 'zoals in de missie'}</span></label>
+            <input id="missie-max" type="range" min="0" max="6" step="0.5" bind:value={maxKmh} on:change={snelheidAanpassen} />
+        </div>
+
+        <div class="knoppen">
+            <label class="knop">Missie laden
+                <input type="file" accept=".json,application/json" on:change={missieKiezen} hidden />
+            </label>
+            <button on:click={missieWissen} disabled={!gekozen || rijdt}>Wissen</button>
+        </div>
+        <p class="klein voet">
+            De robot moet binnen 30 m van het startpunt (of het hervatpunt) staan. Missie en kaart maak je in
+            openagbot-fieldsim; die kan ze ook direct naar de robot sturen.
+        </p>
+    </section>
+
     <!-- Geofence -->
-    <div class="kaartje geofence" class:dicht={gf && (!gf.vooruit || !gf.achteruit)} class:overbrugd={gf?.overbrugd_s > 0}
-         class:geen={gf && !gf.kaart && !gf.kaart_fout}>
-        <div class="kop">
-            <b>Geofence</b>
+    <section class="paneel geofence" class:dicht={gf && (!gf.vooruit || !gf.achteruit)} class:overbrugd={gf?.overbrugd_s > 0}
+             class:geen={gf && !gf.kaart && !gf.kaart_fout}>
+        <h3>Geofence</h3>
+        <div class="gf-tekst">
             {#if !gf}
-                <span>…</span>
+                …
             {:else if gf.kaart_fout}
                 <span class="let-op">{gf.kaart_fout}: de robot rijdt niet</span>
             {:else if gf.overbrugd_s > 0}
-                <span>OVERBRUGD, nog {fmt(gf.overbrugd_s, 0)} s (max {fmt(gf.max_kmh, 1)} km/h)</span>
+                OVERBRUGD, nog {fmt(gf.overbrugd_s, 0)} s (max {fmt(gf.max_kmh, 1)} km/h)
             {:else if !gf.vooruit || !gf.achteruit}
-                <span>{!gf.vooruit && !gf.achteruit ? 'Vooruit en achteruit dicht' : !gf.vooruit ? 'Vooruit dicht, achteruit vrij' : 'Achteruit dicht, vooruit vrij'}: {gf.reden}</span>
+                {!gf.vooruit && !gf.achteruit ? 'Vooruit en achteruit dicht' : !gf.vooruit ? 'Vooruit dicht, achteruit vrij' : 'Achteruit dicht, vooruit vrij'}: {gf.reden}
             {:else if !gf.kaart}
-                <span>Geen kaart op de robot: buiten een missie is er geen bewaking</span>
+                Geen kaart op de robot: buiten een missie is er geen bewaking
             {:else if gf.toestand === 'geen_positie'}
-                <span>Kaart '{gf.kaart.naam}', maar geen GNSS-positie: nu geen bewaking</span>
+                Kaart '{gf.kaart.naam}', maar geen GNSS-positie: nu geen bewaking
             {:else}
-                <span>Actief: kaart '{gf.kaart.naam}', {gf.kaart.stop_zones} gebieden waar hij stopt{gf.missie_grenzen ? ' + grenzen van de missie' : ''}</span>
+                Actief: kaart '{gf.kaart.naam}', {gf.kaart.stop_zones} gebieden waar hij stopt{gf.missie_grenzen ? ' + grenzen van de missie' : ''}
             {/if}
         </div>
         {#if gf?.waarschuwing && gf.toestand !== 'geen_positie'}<div class="klein">Let op: {gf.waarschuwing}</div>{/if}
         {#if gf?.laatste_stop}
             <div class="klein">Laatste stop {gf.laatste_stop.tijd}: {gf.laatste_stop.reden} (bij {fmt(gf.laatste_stop.snelheid_kmh, 1)} km/h)</div>
         {/if}
-        <div class="rij">
-            <label class="knop grijs">Kaart laden (kaart.json)
+        <div class="knoppen gf-knoppen">
+            <label class="knop">Kaart laden
                 <input type="file" accept=".json,application/json" on:change={kaartKiezen} hidden />
             </label>
-            {#if gf?.kaart}<button class="grijs" on:click={kaartWissen}>Kaart wissen</button>{/if}
+            {#if gf?.kaart}<button on:click={kaartWissen}>Kaart wissen</button>{/if}
             {#if gf?.overbrugd_s > 0}
-                <button class="groen" on:click={bewakingAan}>Bewaking weer aan</button>
+                <button class="primair" on:click={bewakingAan}>Bewaking weer aan</button>
             {:else if gf && (!gf.vooruit || !gf.achteruit)}
                 <button class="oranje" on:click={overbruggen}>Overbruggen (60 s)</button>
             {/if}
         </div>
         {#if kaartMelding}<div class="klein">{kaartMelding}</div>{/if}
-    </div>
+    </section>
 
-    <!-- Kaart -->
-    <div class="balk">
-        <button class:aan={volgen} on:click={wisselVolgen} disabled={!heeftPositie}>{volgen ? 'Volgt de robot' : 'Volg robot'}</button>
-        <button on:click={() => tekenMissie(gekozen)} disabled={!gekozen}>Hele missie</button>
-        <button on:click={heleKaart} disabled={!veiligheidskaart}>Hele kaart</button>
-    </div>
-    <div class="kaart" bind:this={kaartDiv}></div>
-    <div class="info">
-        {#if !verbonden}
-            <span class="let-op">Geen verbinding met de robot</span>
-        {:else if heeftPositie}
-            <span class="stip {fix.kleur}"></span>{fix.tekst} · {fmt(pos.speed_kmh, 1)} km/h · koers {fmt(pos.heading, 0)}°
-        {:else}
-            <span class="let-op">Nog geen GPS-positie van de robot</span>
-        {/if}
-    </div>
     <div class="legenda">
         <span><i class="vlak" style="background:#2979ff"></i>sloot + slootzone</span>
         <span><i class="vlak" style="background:#ff1744"></i>verboden</span>
@@ -533,124 +613,24 @@
         <span><i class="lijn gereden"></i>gereden</span>
         <span><i class="lijn doorgang"></i>doorgang</span>
     </div>
-
-    <!-- Missie -->
-    <div class="kaartje">
-        <div class="kop"><b>Missie</b>
-            {#if m?.naam && (actief || m.state !== 'IDLE')}<span class="status {m.state}">{m.state.replaceAll('_', ' ')}</span>{/if}
-        </div>
-        <div class="rij">
-            <select bind:value={gekozen} disabled={actief}>
-                {#if !missies.length}<option value="">geen missies op de robot</option>{/if}
-                {#each missies as x}
-                    <option value={x.naam}>{x.naam}{x.velden?.length ? ` (${x.velden.join(', ')})` : ''}</option>
-                {/each}
-            </select>
-            <label class="knop grijs">Missie laden
-                <input type="file" accept=".json,application/json" on:change={missieKiezen} hidden />
-            </label>
-            <button class="grijs" on:click={missieWissen} disabled={!gekozen || actief}>Wissen</button>
-        </div>
-        {#if info}
-            {#if info.fout}
-                <div class="let-op">Bestand onleesbaar: {info.fout}</div>
-            {:else}
-                <div class="klein">
-                    {info.soort === 'boerderij' ? 'Boerderijmissie' : 'Veldmissie'} · {info.segmenten} stukken
-                    {#if info.lengte_m} · {fmt(info.lengte_m / 1000, 2)} km{/if}
-                    {#if info.tijd_min} · {tijd(info.tijd_min)}{/if}
-                    {#if info.werkbreedte_m} · werkbreedte {info.werkbreedte_m} m{/if}
-                    {#if info.gemaakt} · gemaakt {info.gemaakt.replace('T', ' ')}{/if}
-                    {#if !info.geofence} · zonder eigen geofence{/if}
-                </div>
-                {#if info.afgekeurd}<div class="let-op">Niet te rijden: {info.afgekeurd}.</div>{/if}
-            {/if}
-        {/if}
-
-        {#if m?.naam && m.naam === gekozen && m.totaal_m}
-            <div class="voortgang"><div style="width:{m.procent}%"></div></div>
-            <div class="klein">
-                {fmt(m.s_m, 0)} van {fmt(m.totaal_m, 0)} m ({fmt(m.procent, 0)}%) · stuk {m.segment + 1}/{m.segmenten}: <b>{m.segment_label}</b>
-                · nog {tijd(m.resterend_min)}
-                {#if actief} · afwijking {fmt(m.afwijking_m * 100, 0)} cm · werktuig <b>{m.werktuig_omlaag ? 'OMLAAG' : 'omhoog'}</b>{/if}
-            </div>
-            <div class="bericht">{m.bericht}</div>
-        {/if}
-
-        <div class="rij">
-            {#if actief}
-                {#if m.state === 'WACHT_OP_VRIJGAVE'}
-                    <button class="groen groot" on:click={vrijgeven}>Vrijgeven: oversteken</button>
-                {/if}
-                <button class="rood groot" on:click={stop}>STOP</button>
-            {:else}
-                <button class="groen groot" on:click={() => start(false)} disabled={!info || info.fout || info.afgekeurd}>Start missie</button>
-                {#if hervatbaar}
-                    <button class="blauw groot" on:click={() => start(true)}>Hervat op {fmt(voortgang[gekozen].s_m, 0)} m</button>
-                {/if}
-            {/if}
-        </div>
-        <label class="schuif">Maximale snelheid: <b>{maxKmh ? `${fmt(maxKmh, 1)} km/h` : 'zoals in de missie'}</b>
-            <input type="range" min="0" max="6" step="0.5" bind:value={maxKmh} on:change={snelheidAanpassen} />
-        </label>
-        {#if melding}<div class="let-op">{melding}</div>{/if}
-        <div class="klein grijs-tekst">
-            De robot moet binnen 30 m van het startpunt (of het hervatpunt) staan. Missie en kaart maak je in
-            openagbot-fieldsim; die kan ze ook direct naar de robot sturen.
-        </div>
-    </div>
 </div>
 
 <style>
-    .missie { padding: 15px; }
-    .kaartje { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #fafafa; }
-    .kaartje.geofence { border-left: 6px solid #2e7d32; }
-    .kaartje.geofence.geen { border-left-color: #9e9e9e; }
-    .kaartje.geofence.dicht { border-left-color: #c62828; background: #ffebee; }
-    .kaartje.geofence.overbrugd { border-left-color: #ef6c00; background: #fff3e0; }
-    .kop { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 15px; margin-bottom: 6px; }
-    .rij { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
-    .rij select { flex: 1; min-width: 150px; padding: 10px; font-size: 15px; border-radius: 4px; border: 1px solid #bbb; }
-    button, .knop { padding: 10px 14px; font-size: 14px; font-weight: bold; border: none; border-radius: 4px; color: white; cursor: pointer; display: inline-block; }
-    button:disabled { opacity: 0.5; cursor: default; }
-    .grijs { background: #607d8b; } .groen { background: #2e7d32; } .rood { background: #c62828; }
-    .oranje { background: #ef6c00; } .blauw { background: #1565c0; }
-    .groot { flex: 1; padding: 16px; font-size: 17px; }
-    .klein { font-size: 13px; color: #444; margin-top: 5px; }
-    .grijs-tekst { color: #777; }
-    .bericht { font-size: 14px; margin-top: 4px; color: #222; }
-    .let-op { color: #c62828; font-weight: bold; font-size: 14px; margin-top: 5px; }
-    .status { font-size: 12px; font-weight: bold; padding: 2px 8px; border-radius: 10px; background: #607d8b; color: white; }
-    .status.RIJDEN { background: #2e7d32; } .status.AANLOOP { background: #1565c0; } .status.KLAAR { background: #00838f; }
-    .status.FOUT { background: #c62828; } .status.WACHT_OP_GNSS, .status.WACHT_OP_VRIJGAVE { background: #ef6c00; }
-    .voortgang { height: 10px; background: #cfd8dc; border-radius: 5px; overflow: hidden; margin-top: 10px; }
-    .voortgang div { height: 100%; background: #2e7d32; }
-    .schuif { display: block; font-size: 14px; margin-top: 10px; color: #333; }
-    .schuif input { width: 100%; }
+    .stand { margin: 8px 0; }
+    .start { margin: 10px 0 14px; }
+    .melding { margin-bottom: 10px; }
+    .voet { margin-top: 12px; }
 
-    .balk { display: flex; gap: 8px; margin-bottom: 8px; }
-    .balk button { flex: 1; background: #607d8b; }
-    .balk button.aan { background: #00838f; }
-    .kaart { height: 55vh; min-height: 320px; max-height: 640px; border-radius: 8px; border: 1px solid #ccc; background: #cfd8dc; }
-    .info { font-size: 14px; color: #444; margin-top: 6px; }
-    .stip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
-    .stip.groen { background: #00c853; } .stip.oranje { background: #ff9100; } .stip.rood { background: #d50000; }
-    .legenda { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #555; margin: 8px 0 12px; }
-    .legenda span { display: inline-flex; align-items: center; gap: 5px; }
-    .vlak { display: inline-block; width: 14px; height: 12px; border-radius: 3px; opacity: 0.75; }
-    .lijn { position: relative; display: inline-block; width: 28px; height: 12px; background: #455a64; border-radius: 3px; }
-    .lijn::after { content: ''; position: absolute; left: 3px; right: 3px; top: 50%; transform: translateY(-50%); border-top: 2px solid; }
+    .geofence { border-left: 6px solid var(--groen); }
+    .geofence.geen { border-left-color: var(--inkt2); }
+    .geofence.dicht { border-left-color: var(--rood); background: var(--rood-vlak); }
+    .geofence.overbrugd { border-left-color: var(--oranje); background: var(--oranje-vlak); }
+    .gf-tekst { font-size: 15px; }
+    .gf-knoppen { margin: 10px 0 6px; }
+
     .lijn.werk::after { border-top: 2px solid #ffffff; }
     .lijn.rij::after { border-top: 2px dashed #FF9100; }
     .lijn.nu::after { border-top: 4px solid #00E5FF; }
     .lijn.gereden::after { border-top: 4px solid #FFEA00; }
     .lijn.doorgang::after { border-top: 4px solid #00e676; }
-
-    :global(.robot-icoon) { background: none; border: none; }
-    :global(.robot-pijl) { transition: transform 0.3s linear; filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)); }
-    :global(.robot-pijl svg) { display: block; }
-    :global(.robot-pijl path) { fill: currentColor; stroke: #ffffff; stroke-width: 1.6; stroke-linejoin: round; }
-    :global(.robot-pijl.groen) { color: #00c853; }
-    :global(.robot-pijl.oranje) { color: #ff9100; }
-    :global(.robot-pijl.rood) { color: #d50000; }
 </style>

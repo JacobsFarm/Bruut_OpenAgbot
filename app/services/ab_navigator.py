@@ -3,7 +3,7 @@ import time
 import threading
 import logging
 
-from app.services.gnss_navigatie import GnssBewaker, LijnRegelaar
+from app.services.gnss_navigatie import GnssBewaker, LijnRegelaar, pad_krommingen
 
 try:
     from app.services.logger import DriveLogger
@@ -108,6 +108,20 @@ class ABNavigator:
         self.turn_timeout_s = nav_cfg.get("turn_timeout_s", 90.0)
         # Sample-afstand van het bochtpad (m). Kleiner = gladder, meer punten.
         self.turn_step_m = 0.25
+        # Hoe de bocht gevolgd wordt. 'pad' = vooruitsturing op de kromming
+        # van het bochtpad plus Stanley op de raaklijn (LijnRegelaar.stuur_pad);
+        # 'pure_pursuit' = sturen op een punt turn_lookahead_m verderop, zoals
+        # vroeger.
+        self.turn_controller = nav_cfg.get("turn_controller", "pad")
+        # De vorm van het bochtpad: 'vloeiend' = de kromming loopt geleidelijk
+        # op en af, zodat de stuurmotoren het kunnen volgen (_vloeiende_bocht);
+        # 'bogen' = drie cirkelbogen op de kleinste draaicirkel, zoals vroeger.
+        self.turn_shape = nav_cfg.get("turn_shape", "vloeiend")
+        self.turn_radius_margin = max(1.0, float(nav_cfg.get("turn_radius_margin", 1.1)))
+        self.turn_rate_fraction = min(1.0, max(0.1, float(nav_cfg.get("turn_rate_fraction", 0.6))))
+        self._bocht_cache = {}
+        self.turn_kappa = []             # kromming per padpunt (1/m, + = rechts)
+        self.turn_s = []                 # booglengte per padpunt (m)
         # Baan oppakken: na een bocht (en bij de start) komt hij centimeters
         # naast de lijn en een paar graden scheef binnen. Tot hij binnen deze
         # afwijking EN koersfout op de lijn ligt, staat de integrator van de
@@ -121,6 +135,16 @@ class ABNavigator:
         self.capture_timeout_s = float(nav_cfg.get("lane_capture_timeout_s", 20.0))
         self._baan_opgepakt = False
         self._baan_start = None          # moment van de eerste regelstap op deze baan
+        # Van de baan af: heeft hij de lijn eenmaal te pakken (binnen de helft
+        # van max_cross_track_m) en raakt hij daarna verder dan
+        # max_cross_track_m ervan af, dan klopt er iets niet - een stuurmotor
+        # die stappen verliest, een voorwiel dat vastzit, wegglijden op een
+        # talud - en stopt de missie in plaats van naast de baan door te
+        # rijden. In een kopakkerbocht geldt max_turn_deviation_m tot het
+        # bochtpad. 0 = uit.
+        self.max_xte_m = float(nav_cfg.get("max_cross_track_m", 1.0))
+        self.max_turn_dev_m = float(nav_cfg.get("max_turn_deviation_m", 2.0))
+        self._lijn_bereikt = False
 
         self.bewaker = GnssBewaker(config)
         self.regelaar = LijnRegelaar(config, self.wheelbase, self.max_angle)
@@ -231,7 +255,7 @@ class ABNavigator:
         self.current_swath = self.swath_order[0]
         self.first_sign = None
         self.pass_sign = 1.0
-        self._baan_opgepakt, self._baan_start = False, None
+        self._baan_opgepakt, self._baan_start, self._lijn_bereikt = False, None, False
         self.state = "TRACKING"
         self.status_message = "Missie gestart"
         self.voltooid = False
@@ -548,6 +572,17 @@ class ABNavigator:
             self.state = "TURNING"
             return
 
+        # Van de baan af (zie max_cross_track_m): stoppen, niet doorrijden.
+        if self.max_xte_m > 0.0:
+            if abs(xte) <= 0.5 * self.max_xte_m:
+                self._lijn_bereikt = True
+            elif self._lijn_bereikt and abs(xte) > self.max_xte_m:
+                self._stop_met_fout(
+                    f"{abs(xte):.2f} m naast baan {self.current_swath} (max {self.max_xte_m:.2f} m): "
+                    f"controleer het stuur en de voorwielen"
+                )
+                return
+
         # Rechte baan: de LijnRegelaar (Stanley of pure pursuit). Hij krijgt de
         # lijn in de RIJRICHTING: terug (B->A) is de koers 180 graden om en
         # ligt 'rechts' aan de andere kant.
@@ -564,7 +599,7 @@ class ABNavigator:
         )
         target_bearing = lijn_koers
 
-        self.vehicle.drive(self.toegestaan_kmh, steering)
+        self.vehicle.drive(self.toegestaan_kmh, steering, timeout_s=self.vehicle.nav_timeout_s)
 
         rest = sign * (uitrij_along - along)
         self.status_message = (
@@ -586,6 +621,12 @@ class ABNavigator:
                 motor=self.vehicle.log_snapshot(),
                 xte=xte, regelaar=self.regelaar.soort, gnss=curr_pos
             )
+
+    def _stop_met_fout(self, reden):
+        """Missie afbreken met een reden die in de webinterface blijft staan."""
+        self.logger.error(f"AB-missie gestopt: {reden}")
+        self.stop()
+        self.status_message = f"Gestopt - {reden}"
 
     def _oppakken_bijwerken(self, xte, koersfout):
         """
@@ -631,7 +672,7 @@ class ABNavigator:
             self.order_index += 1
             self.current_swath = self.swath_order[self.order_index]
             self.pass_sign = -self.pass_sign
-            self._baan_opgepakt, self._baan_start = False, None
+            self._baan_opgepakt, self._baan_start, self._lijn_bereikt = False, None, False
             self.state = "TRACKING"
             if timeout:
                 self.logger.warning(
@@ -642,16 +683,46 @@ class ABNavigator:
                 self.logger.info(f"Bocht klaar. Baan {self.current_swath} wordt opgepakt.")
             return
 
-        # 3. Carrot: het eerste padpunt op minstens 'turn_lookahead' meter.
-        doel = self.turn_path[-1]
-        for i in range(self.turn_idx, len(self.turn_path)):
-            if self._pad_afstand(self.turn_path[i], along, cross) >= self.turn_lookahead_m:
-                doel = self.turn_path[i]
-                break
+        # 2b. Te ver van het bochtpad: zelfde vangnet als op de baan.
+        if self.max_turn_dev_m > 0.0 and beste_d > self.max_turn_dev_m:
+            self._stop_met_fout(
+                f"{beste_d:.2f} m van het bochtpad (max {self.max_turn_dev_m:.2f} m): "
+                f"controleer het stuur en de voorwielen"
+            )
+            return
 
-        target_bearing = self._frame_bearing(doel[0] - along, doel[1] - cross)
-        steering = self.regelaar.pure_pursuit(target_bearing, heading, self.turn_lookahead_m)
-        self.vehicle.drive(self.toegestaan_kmh, steering)
+        if self.turn_controller == "pad":
+            # 3a. Het pad zelf volgen: waar ligt de robot t.o.v. het stuk pad
+            #     waar hij nu is, en welke bocht maakt het pad daar (en vlak
+            #     daarna)? Zie LijnRegelaar.stuur_pad().
+            i = min(self.turn_idx, len(self.turn_path) - 2)
+            for _ in range(2):
+                a0, c0 = self.turn_path[i]
+                da, dc = self.turn_path[i + 1][0] - a0, self.turn_path[i + 1][1] - c0
+                lengte2 = da * da + dc * dc
+                t = ((along - a0) * da + (cross - c0) * dc) / lengte2
+                if t >= 0.0 or i == 0:
+                    break
+                i -= 1                   # de robot ligt nog voor dit punt: het vorige stuk
+            rechts = ((cross - c0) * da - (along - a0) * dc) / math.sqrt(lengte2)
+            target_bearing = self._frame_bearing(da, dc)
+            kmh = curr_pos.get("speed_kmh", 0.0)
+            kromming = self.regelaar.kromming_vooruit(self.turn_kappa, self.turn_s, self.turn_idx, kmh)
+            steering = self.regelaar.stuur_pad(heading, target_bearing, rechts, kromming, kmh,
+                                               curr_pos.get("draaisnelheid_dps", 0.0))
+            regelaar = "pad"
+        else:
+            # 3b. Carrot: het eerste padpunt op minstens 'turn_lookahead' meter.
+            doel = self.turn_path[-1]
+            for i in range(self.turn_idx, len(self.turn_path)):
+                if self._pad_afstand(self.turn_path[i], along, cross) >= self.turn_lookahead_m:
+                    doel = self.turn_path[i]
+                    break
+
+            target_bearing = self._frame_bearing(doel[0] - along, doel[1] - cross)
+            steering = self.regelaar.pure_pursuit(target_bearing, heading, self.turn_lookahead_m)
+            regelaar = "pure_pursuit"
+        self.vehicle.drive(self.toegestaan_kmh, steering, timeout_s=self.vehicle.nav_timeout_s)
 
         self.status_message = (
             f"Kopakkerbocht naar baan {self.swath_order[self.order_index + 1]} - "
@@ -669,7 +740,7 @@ class ABNavigator:
                 echt_kmh=curr_pos.get("speed_kmh", 0.0),
                 dist_wp=beste_d, lookahead=self.turn_lookahead_m, dt=self._dt,
                 motor=self.vehicle.log_snapshot(),
-                xte=beste_d, regelaar="pure_pursuit", gnss=curr_pos
+                xte=beste_d, regelaar=regelaar, gnss=curr_pos
             )
 
     def _plan_turn(self, along):
@@ -685,6 +756,13 @@ class ABNavigator:
         self.turn_tail_idx = staart_idx
         self.turn_idx = 0
         self.turn_start_time = time.time()
+        # Kromming en booglengte per padpunt, voor de padregelaar. In het
+        # baanframe is 'cross' naar rechts en 'along' vooruit.
+        self.turn_kappa = pad_krommingen([p[1] for p in pad], [p[0] for p in pad],
+                                         max_kromming=1.0 / self._min_radius())
+        self.turn_s = [0.0]
+        for (a0, c0), (a1, c1) in zip(pad, pad[1:]):
+            self.turn_s.append(self.turn_s[-1] + math.hypot(a1 - a0, c1 - c0))
 
         # Richting van de volgende baan = de huidige, 180 graden omgekeerd.
         nieuw_sign = -self.pass_sign
@@ -728,6 +806,35 @@ class ABNavigator:
         d = abs(d_rechts)
         spiegel = 1.0 if d_rechts >= 0 else -1.0
 
+        if self.turn_shape == "bogen":
+            punten, psi, soort = self._bogen_bocht(d, spiegel)
+        else:
+            basis, soort = self._vloeiende_bocht(d)
+            punten = [(pu, spiegel * pv) for pu, pv in basis]
+            psi = spiegel * 180.0
+        u, v = punten[-1]
+
+        # Rechte aanloop op de nieuwe lijn, zodat de pure-pursuit carrot aan het
+        # eind van de bocht niet 'opraakt' en de robot netjes uitgelijnd wordt.
+        staart_idx = len(punten) - 1
+        staart_m = self.turn_lookahead_m + 1.5
+        pr = math.radians(psi)
+        du, dv = math.cos(pr) * self.turn_step_m, math.sin(pr) * self.turn_step_m
+        for _ in range(max(1, int(staart_m / self.turn_step_m))):
+            u += du
+            v += dv
+            punten.append((u, v))
+
+        diepte = max(p[0] for p in punten)             # hoe ver de bocht vooruit steekt
+        pad = [(exit_along + sign * pu, cross_van + sign * pv) for pu, pv in punten]
+        return pad, staart_idx, diepte, soort
+
+    def _bogen_bocht(self, d, spiegel):
+        """
+        De bocht als drie cirkelbogen met dezelfde straal (zie _bouw_bochtpad),
+        zoals vroeger: navigation.turn_shape = "bogen". De stuurhoek springt
+        daarbij op elke overgang in een keer om.
+        """
         r_min = self._min_radius()
         if d >= 2.0 * r_min:
             radius = d / 2.0
@@ -762,21 +869,129 @@ class ABNavigator:
                 u = cu + draai * r * math.sin(pr)
                 v = cv - draai * r * math.cos(pr)
                 punten.append((u, v))
+        return punten, psi, soort
 
-        # Rechte aanloop op de nieuwe lijn, zodat de pure-pursuit carrot aan het
-        # eind van de bocht niet 'opraakt' en de robot netjes uitgelijnd wordt.
-        staart_idx = len(punten) - 1
-        staart_m = self.turn_lookahead_m + 1.5
-        pr = math.radians(psi)
-        du, dv = math.cos(pr) * self.turn_step_m, math.sin(pr) * self.turn_step_m
-        for _ in range(max(1, int(staart_m / self.turn_step_m))):
-            u += du
-            v += dv
-            punten.append((u, v))
+    def _vloeiende_bocht(self, d):
+        """
+        De bocht als pad dat de robot ECHT kan rijden: de kromming verandert
+        geleidelijk in plaats van in sprongen (navigation.turn_shape = "vloeiend").
 
-        diepte = max(p[0] for p in punten)             # hoe ver de bocht vooruit steekt
-        pad = [(exit_along + sign * pu, cross_van + sign * pv) for pu, pv in punten]
-        return pad, staart_idx, diepte, soort
+        Een stuurmotor heeft tijd nodig om van de ene uitslag naar de andere te
+        komen. Bij drie cirkelbogen moet de stuurhoek op elke overgang in een
+        keer om (bij een omega-bocht van vol links naar vol rechts): dat lukt
+        niet, de robot raakt naast het pad, en omdat het pad al de scherpste
+        bocht vraagt is er geen uitslag over om dat goed te maken (in de sim
+        tot 75 cm ernaast, 7 cm scheef het gewas in). Hier loopt de kromming
+        daarom met een vaste helling op en af, zo traag dat de stuurmotoren het
+        op turn_rate_fraction van hun snelheid kunnen volgen bij de
+        bochtsnelheid van nu, en blijft de scherpste bocht turn_radius_margin
+        ruimer dan de draaicirkel: dan is er altijd uitslag over om bij te sturen.
+
+        De opbouw is die van _bouw_bochtpad (uitwijken, de lus, rechtkomen), en
+        omdat het krommingsverloop van voor naar achter hetzelfde is, eindigt
+        ook deze bocht op dezelfde 'along' als waar hij begon. Hoe ruim de lus
+        wordt (of hoe ver hij uitwijkt) wordt gezocht tot de zijsprong klopt.
+
+        Geeft (punten in het voertuigframe voor een bocht naar RECHTS, soort).
+        """
+        kappa_max = 1.0 / (self._min_radius() * self.turn_radius_margin)
+        v = max(0.3, self.turn_speed_kmh / 3.6)
+        # Stuurhoek -> kromming is tan(hoek) / wielbasis; rond rechtuit is dat
+        # het traagst (1 / wielbasis per radiaal), dus daarmee is het veilig.
+        sigma = (math.radians(self.regelaar.stuursnelheid_dps * self.turn_rate_fraction)
+                 / self.wheelbase / v)                      # 1/m per meter pad
+        sleutel = (round(d, 3), round(kappa_max, 5), round(sigma, 4), self.turn_step_m)
+        if sleutel in self._bocht_cache:
+            return self._bocht_cache[sleutel]
+
+        def rijd(alpha, kappa, stap=None):
+            stukken = []
+            for theta in (-alpha, math.pi + 2.0 * alpha, -alpha):
+                stukken += self._overgangsboog(theta, kappa, sigma)
+            return self._integreer(stukken, stap)
+
+        if d >= rijd(0.0, kappa_max)[1]:
+            # Ruimte genoeg: een U-bocht. Zoek de kromming waarmee hij precies
+            # d opzij uitkomt (ruimer = verder opzij).
+            laag, hoog = 1e-3, kappa_max
+            for _ in range(40):
+                mid = 0.5 * (laag + hoog)
+                if rijd(0.0, mid)[1] > d:
+                    laag = mid
+                else:
+                    hoog = mid
+            alpha, kappa = 0.0, hoog
+            soort = "halve cirkel"
+        else:
+            # Te krap: eerst uitwijken (omega). Verder uitwijken = minder opzij.
+            laag, hoog = 0.0, math.radians(80.0)
+            for _ in range(40):
+                mid = 0.5 * (laag + hoog)
+                if rijd(mid, kappa_max)[1] > d:
+                    laag = mid
+                else:
+                    hoog = mid
+            alpha, kappa = hoog, kappa_max
+            soort = f"omega, uitwijkhoek {math.degrees(alpha):.0f} graden"
+
+        resultaat = (rijd(alpha, kappa, self.turn_step_m)[2], soort)
+        if len(self._bocht_cache) > 64:
+            self._bocht_cache.clear()
+        self._bocht_cache[sleutel] = resultaat
+        return resultaat
+
+    @staticmethod
+    def _overgangsboog(theta, kappa, sigma):
+        """
+        Een bocht van theta radialen (+ = rechts) als stukken (lengte,
+        kromming begin, kromming eind): oplopen met helling sigma tot kappa,
+        vasthouden, en weer aflopen. Is de bocht te kort om kappa te halen,
+        dan loopt hij op tot wat wel past en meteen weer af.
+        """
+        if abs(theta) < 1e-9:
+            return []
+        teken = 1.0 if theta > 0 else -1.0
+        hoek = abs(theta)
+        if kappa * kappa / sigma >= hoek:
+            piek = math.sqrt(hoek * sigma)
+            helling = piek / sigma
+            return [(helling, 0.0, teken * piek), (helling, teken * piek, 0.0)]
+        helling = kappa / sigma
+        return [(helling, 0.0, teken * kappa),
+                (hoek / kappa - helling, teken * kappa, teken * kappa),
+                (helling, teken * kappa, 0.0)]
+
+    @staticmethod
+    def _integreer(stukken, stap=None):
+        """
+        Rijdt de stukken van _overgangsboog af vanaf (0, 0) met de neus langs
+        u. Geeft (u, v, punten): de eindpositie, en met 'stap' de punten van
+        het pad om de 'stap' meter (anders None).
+        """
+        ds = 0.01
+        u, v, psi, s = 0.0, 0.0, 0.0, 0.0
+        punten = [(0.0, 0.0)] if stap else None
+        volgende = stap
+        for lengte, k0, k1 in stukken:
+            n = max(1, int(round(lengte / ds)))
+            h = lengte / n
+            for i in range(n):
+                k = k0 + (k1 - k0) * (i + 0.5) / n
+                midden = psi + 0.5 * k * h
+                u += math.cos(midden) * h
+                v += math.sin(midden) * h
+                psi += k * h
+                s += h
+                if stap and s >= volgende - 1e-9:
+                    punten.append((u, v))
+                    volgende += stap
+        if stap:
+            # Het eindpunt hoort er precies in: daar begint de rechte aanloop.
+            if math.hypot(u - punten[-1][0], v - punten[-1][1]) < 0.3 * stap and len(punten) > 1:
+                punten[-1] = (u, v)
+            else:
+                punten.append((u, v))
+        return u, v, punten
 
     def _min_radius(self):
         """Minimale draaicirkel van het virtuele midden van de vooras (m)."""

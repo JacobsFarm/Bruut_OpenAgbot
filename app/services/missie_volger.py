@@ -580,7 +580,7 @@ class MissieVolger:
 
             self.state = "RIJDEN" if self.opgepakt else "AANLOOP"
             self.werktuig_omlaag = self.opgepakt and seg["omlaag"]
-            self.vehicle.drive(snelheid, stuur)
+            self.vehicle.drive(snelheid, stuur, timeout_s=self.vehicle.nav_timeout_s)
             if self.opgepakt:
                 self.status_message = (
                     f"{seg['label']} ({self.segment + 1}/{len(pad.segmenten)}): {self.s:.0f} van {pad.lengte:.0f} m, "

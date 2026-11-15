@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import threading
 from typing import Optional
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import StreamingResponse
@@ -22,13 +24,55 @@ WAYPOINTS_FILE = 'data/waypoints.json'
 class ManualDriveCommand(BaseModel):
     speed_kmh: float
     steering_percentage: float
+    # Wie er rijdt (een naam per apparaat / browservenster). Optioneel: oude
+    # clients en scripts sturen niets en tellen samen als één bestuurder.
+    bron: Optional[str] = None
+
+
+class Bestuurder:
+    """
+    Eén apparaat tegelijk aan het stuur. Rijdt de telefoon, dan kan een tweede
+    scherm (de desktop-app, een andere telefoon) niet tegelijk commando's
+    sturen: om de beurt een ander commando is erger dan geen van beide. Wie
+    rijdt houdt het stuur tot hij loslaat (snelheid 0) of zijn dodemansknop
+    verloopt. De noodstop (/api/stop) gaat hier niet langs en werkt altijd,
+    vanaf elk apparaat.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.bron = None
+        self._tot = 0.0
+
+    def neem(self, bron, rijdt, timeout_s):
+        """True als 'bron' nu mag sturen; anders rijdt een ander apparaat."""
+        bron = bron or "onbekend apparaat"
+        nu = time.monotonic()
+        with self._lock:
+            if self.bron is not None and bron != self.bron and nu < self._tot:
+                return False
+            if rijdt:
+                self.bron, self._tot = bron, nu + timeout_s
+            else:
+                self.bron = None
+            return True
+
+    def huidige(self):
+        with self._lock:
+            return self.bron if time.monotonic() < self._tot else None
+
+    def los(self):
+        with self._lock:
+            self.bron = None
+
+
+bestuurder = Bestuurder()
 
 class SteeringEnableCommand(BaseModel):
     enable: bool
-    wheel: str = None      # None = beide voorwielen, anders 'left' of 'right'
+    wheel: Optional[str] = None      # None = beide voorwielen, anders 'left' of 'right'
 
 class SteeringZeroCommand(BaseModel):
-    wheel: str = None      # None = beide voorwielen, anders 'left' of 'right'
+    wheel: Optional[str] = None      # None = beide voorwielen, anders 'left' of 'right'
 
 class SteeringJogCommand(BaseModel):
     left_delta: float = 0.0
@@ -176,10 +220,30 @@ def get_ab_lijnen():
 def noodstop():
     stop_alle_navigatie()
     vehicle_controller.stop()
+    bestuurder.los()
     return {"status": "stopped"}
+
+@router.get("/info")
+def info():
+    """
+    Wat voor robot dit is: maten, grenzen en instellingen die een ander
+    programma nodig heeft om hem te tekenen en te volgen (de desktop-app in
+    de stand 'live meekijken'). Geen poorten, wachtwoorden of camera.
+    """
+    delen = ("vehicle", "steering", "vesc", "battery", "gnss", "geofence", "navigation", "missie")
+    return {
+        "naam": "Bruut OpenAgbot",
+        "api": 2,
+        "simulatie": config.get("system", {}).get("os") == "sim",
+        "config": {k: config[k] for k in delen if k in config},
+        "max_center_angle_degrees": vehicle_controller.max_center_angle,
+    }
 
 @router.post("/nav/manual_drive")
 def manual_drive(cmd: ManualDriveCommand):
+    # Eén apparaat tegelijk: rijdt een ander, dan doet dit commando niets.
+    if not bestuurder.neem(cmd.bron, cmd.speed_kmh != 0.0, vehicle_controller.manual_timeout_s):
+        return {"status": "blocked", "msg": f"een ander apparaat rijdt nu ({bestuurder.huidige() or 'onbekend'})"}
     # Niet via stop_alle_navigatie(): handmatig rijden is juist waar een
     # overbrugde geofence voor bedoeld is.
     for nav in (navigator, ab_navigator, missie_volger):

@@ -65,6 +65,17 @@ class StepperSteering:
         self._last_sent = None
         self._last_send_time = 0.0
 
+        # --- BEWAKING ---
+        # Zonder stuur rijdt de robot rechtdoor waar hij een bocht moest maken.
+        # Antwoordt de Arduino fault_after_failures commando's achter elkaar
+        # niet (of is de poort dicht), dan meldt 'fault' dat en zet de
+        # VehicleController de aandrijving stil. Eén gemist antwoord is nog
+        # geen storing: het volgende commando wordt sowieso opnieuw verstuurd.
+        self.fault_after_failures = max(1, int(steering_config.get("fault_after_failures", 3)))
+        self._failures = 0               # mislukte transacties op rij
+        self._fail_since = None          # monotonic: begin van die reeks
+        self._last_fail_log = 0.0
+
         self.serial_conn = None
         self._lock = threading.Lock()
 
@@ -79,8 +90,22 @@ class StepperSteering:
             self.serial_conn.reset_input_buffer()  # gooi de READY-regel weg
             self.logger.info(f"Verbonden met Arduino Stuur-Controller op {self.port}")
             self._configure_firmware()
+            threading.Thread(target=self._bewaak, daemon=True, name="stuur-bewaking").start()
         except serial.SerialException as e:
             self.logger.error(f"Kan geen verbinding maken met stuur-Arduino op {self.port}: {e}")
+
+    def _bewaak(self):
+        """
+        Zodra de Arduino niet meer antwoordt stopt de robot, en dan stuurt er
+        ook niemand meer een commando: zonder deze lus zou 'fault' daarna voor
+        altijd blijven staan. Zolang er een storing is vraagt hij daarom eens
+        per seconde het firmware-ID op; het eerste antwoord heft de storing op.
+        Loopt alles goed, dan doet deze lus niets.
+        """
+        while self.serial_conn is not None and self.serial_conn.is_open:
+            time.sleep(1.0)
+            if self._failures > 0:
+                self._transaction("I:?")
 
     # ------------------------------------------------------------------
     # Seriële laag
@@ -132,9 +157,7 @@ class StepperSteering:
         """Verstuur een commando en lees het bijbehorende antwoord."""
         with self._lock:
             if not (self.serial_conn and self.serial_conn.is_open):
-                self.logger.warning(
-                    f"Kan commando '{command}' niet sturen: Seriële verbinding is dicht."
-                )
+                self._mislukt(f"Kan commando '{command}' niet sturen: Seriële verbinding is dicht.")
                 return None
             try:
                 # Restjes van een eerder afgekapt antwoord opruimen, zodat we
@@ -142,16 +165,45 @@ class StepperSteering:
                 self.serial_conn.reset_input_buffer()
                 self.serial_conn.write(f"{command}\n".encode("utf-8"))
             except Exception as e:
-                self.logger.error(f"Fout bij verzenden commando '{command}': {e}")
+                self._mislukt(f"Fout bij verzenden commando '{command}': {e}")
                 return None
 
             reply = self._read_reply(time.time() + timeout)
 
-        if reply is None:
-            self.logger.warning(f"Geen antwoord van de stuur-Arduino op '{command}'")
-        elif reply.startswith("ERR:"):
+            if reply is None:
+                self._mislukt(f"Geen antwoord van de stuur-Arduino op '{command}'")
+            else:
+                if self._failures >= self.fault_after_failures:
+                    self.logger.info("Stuur-Arduino antwoordt weer.")
+                self._failures, self._fail_since = 0, None
+
+        if reply is not None and reply.startswith("ERR:"):
             self.logger.error(f"Stuur-Arduino weigerde '{command}': {reply}")
         return reply
+
+    def _mislukt(self, melding):
+        """
+        Aanroepen met de lock vast. Telt de mislukte transactie en logt hem,
+        maar hoogstens eens per 2 s: de navigatielus probeert het 25 keer per
+        seconde opnieuw en zou de log anders vullen.
+        """
+        nu = time.monotonic()
+        if self._failures == 0:
+            self._fail_since = nu
+        self._failures += 1
+        if nu - self._last_fail_log >= 2.0:
+            self._last_fail_log = nu
+            self.logger.warning(f"{melding} ({self._failures}x achter elkaar)")
+
+    @property
+    def fault(self):
+        """Waarom er niet gestuurd kan worden, of None als de Arduino gewoon antwoordt."""
+        if not (self.serial_conn and self.serial_conn.is_open):
+            return "stuur-Arduino niet verbonden"
+        if self._failures >= self.fault_after_failures:
+            stil = time.monotonic() - (self._fail_since or time.monotonic())
+            return f"stuur-Arduino antwoordt niet ({self._failures} commando's, {stil:.0f} s)"
+        return None
 
     # ------------------------------------------------------------------
     # Omrekenen tussen voertuigframe en motorframe

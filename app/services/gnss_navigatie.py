@@ -37,6 +37,69 @@ def peiling(lat1, lon1, lat2, lon2):
     return math.degrees(math.atan2(y, x)) % 360.0
 
 
+def pad_krommingen(xs, ys, max_kromming=None, venster=0):
+    """
+    Kromming (1/m, positief = bocht naar RECHTS) in elk punt van een polylijn,
+    met x naar rechts/oost en y vooruit/noord. Uit drie opeenvolgende punten
+    (de cirkel erdoorheen); op een cirkelboog met vaste stap is dat exact
+    1/straal. Een knik tussen twee rechte stukken geeft een piek: die wordt
+    begrensd op max_kromming (wat het voertuig kan sturen) en met 'venster'
+    punten aan weerszijden uitgesmeerd, zodat de stuurhoek er niet in een
+    stap naartoe springt.
+    """
+    n = len(xs)
+    k = [0.0] * n
+    for i in range(1, n - 1):
+        ax, ay = xs[i] - xs[i - 1], ys[i] - ys[i - 1]
+        bx, by = xs[i + 1] - xs[i], ys[i + 1] - ys[i]
+        la, lb = math.hypot(ax, ay), math.hypot(bx, by)
+        lc = math.hypot(xs[i + 1] - xs[i - 1], ys[i + 1] - ys[i - 1])
+        if la < 1e-6 or lb < 1e-6 or lc < 1e-6:
+            continue
+        # Kruisproduct > 0 = linksom in een x-rechts/y-omhoog stelsel; rechtsom is hier positief.
+        waarde = -2.0 * (ax * by - ay * bx) / (la * lb * lc)
+        if max_kromming is not None:
+            waarde = max(-max_kromming, min(max_kromming, waarde))
+        k[i] = waarde
+    if n > 2:
+        k[0], k[-1] = k[1], k[-2]
+    if venster > 0:
+        glad = []
+        for i in range(n):
+            stuk = k[max(0, i - venster):i + venster + 1]
+            glad.append(sum(stuk) / len(stuk))
+        k = glad
+    return k
+
+
+def kromming_vooruit(krommingen, afstanden, idx, snelheid_mps, wielbasis, stuursnelheid_dps, horizon_s=1.5):
+    """
+    De kromming waarop NU gestuurd moet worden, vanaf padpunt idx.
+
+    De stuurmotoren draaien met een eindige snelheid. Gaat het pad verderop
+    van recht naar een boog (of van een boog linksom naar een boog rechtsom),
+    dan moeten ze beginnen te draaien VOORDAT de robot daar is: de helft van
+    de tijd die de wissel kost ervoor, de andere helft erna. Zo ligt de
+    onvermijdelijke fout gelijk verdeeld rond het overgangspunt in plaats van
+    helemaal erachter. Bij 2 km/h en een wissel van 25 graden is dat ca. 20 cm
+    eerder; een vaste lookahead (pure pursuit, 1,5 m) begint 7x te vroeg en
+    snijdt de bocht af.
+
+    afstanden[i] = booglengte van het pad tot punt i (m).
+    """
+    k_nu = krommingen[idx]
+    hoek_nu = math.degrees(math.atan(wielbasis * k_nu))
+    v = max(0.2, snelheid_mps)
+    eind = afstanden[idx] + v * horizon_s
+    for j in range(idx + 1, len(krommingen)):
+        if afstanden[j] > eind:
+            break
+        wissel_s = abs(math.degrees(math.atan(wielbasis * krommingen[j])) - hoek_nu) / stuursnelheid_dps
+        if afstanden[j] - afstanden[idx] <= v * wissel_s / 2.0:
+            k_nu = krommingen[j]
+    return k_nu
+
+
 class GnssBewaker:
     """
     Beoordeelt per regelstap de GNSS-meting en geeft de toegestane snelheid.
@@ -173,6 +236,9 @@ class LijnRegelaar:
         self.i_max = float(nav.get("integral_max_deg", 6.0))
         self.i_zone = float(nav.get("integral_zone_m", 0.3))
         self.i_meenemen = bool(nav.get("integral_carry_over", True))
+        # Hoe snel de stuurmotoren een hoek halen (graden/s, inclusief hun
+        # optrekramp): bepaalt hoe vroeg de vooruitsturing in een bocht begint.
+        self.stuursnelheid_dps = max(5.0, float(nav.get("steering_rate_dps", 40.0)))
         self.wielbasis = wielbasis
         self.max_hoek = max_hoek
         self._integraal = 0.0                                # graden stuur
@@ -229,6 +295,42 @@ class LijnRegelaar:
         e_voor = afwijking_m + self.wielbasis * math.sin(math.radians(-koersfout))
         terug = math.degrees(math.atan2(-self.k * e_voor, self.v_zacht + v))
         hoek = self.k_koers * koersfout + terug - self.k_draai * draaisnelheid_dps + self._integraal
+        return max(-self.max_hoek, min(self.max_hoek, hoek))
+
+    def kromming_vooruit(self, krommingen, afstanden, idx, snelheid_kmh):
+        """De kromming waarop nu gestuurd moet worden (zie de functie kromming_vooruit)."""
+        return kromming_vooruit(krommingen, afstanden, idx, snelheid_kmh / 3.6, self.wielbasis,
+                                self.stuursnelheid_dps)
+
+    def stuur_pad(self, heading, pad_koers, afwijking_m, kromming, snelheid_kmh, draaisnelheid_dps):
+        """
+        Stuurhoek om een GEBOGEN pad te volgen (kopakkerbocht, rondje, overgang).
+
+        Drie delen:
+          - vooruitsturing: de stuurhoek die bij de bocht van het pad hoort,
+            atan(wielbasis x kromming). Die rijdt de boog al zonder dat er
+            eerst een fout hoeft te ontstaan. De aanroeper geeft de kromming
+            een stukje VOORUIT op het pad: de stuurmotoren hebben tijd nodig
+            (ca. 35 graden/s), dus beginnen ze te draaien voordat de bocht er is.
+          - Stanley op de raaklijn van het pad: koersfout plus de afwijking
+            van de vooras, net als op een rechte baan.
+          - demping op de draaisnelheid, maar alleen op het verschil met de
+            draaisnelheid die bij de bocht hoort (snelheid x kromming);
+            anders werkt de demping de bocht zelf tegen.
+        Geen integrator: een bocht duurt daar te kort voor.
+
+        pad_koers   - richting van het pad op de plek van de robot (graden)
+        afwijking_m - regelpunt t.o.v. het pad, + = rechts ervan
+        kromming    - 1/m, + = het pad buigt naar rechts
+        """
+        v = max(0.0, snelheid_kmh / 3.6)
+        koersfout = norm180(pad_koers - heading)
+        e_voor = afwijking_m + self.wielbasis * math.sin(math.radians(-koersfout))
+        terug = math.degrees(math.atan2(-self.k * e_voor, self.v_zacht + v))
+        vooruit = math.degrees(math.atan(self.wielbasis * kromming))
+        draai_pad = math.degrees(v * kromming)
+        hoek = (vooruit + self.k_koers * koersfout + terug
+                - self.k_draai * (draaisnelheid_dps - draai_pad))
         return max(-self.max_hoek, min(self.max_hoek, hoek))
 
     def pure_pursuit(self, doel_peiling, heading, lookahead_m):
