@@ -170,8 +170,8 @@ The newest configuration is the 2WD with two steered front wheels and two driven
 
 <img width="1434" height="1080" alt="The 2WD Bruut" src="https://github.com/user-attachments/assets/1d894250-b270-43b1-836e-3cf6760740ba" />
 
-The designs live in [CAD_designs](CAD_designs) (OpenSCAD assemblies, and script-generated FreeCAD models in
-`CAD_designs/freecad`). They were reworked after field testing: stronger, more realistic and with room for
+The designs live in [openagbot-CADdesigns](https://github.com/JacobsFarm/openagbot-CADdesigns) (OpenSCAD assemblies, and script-generated FreeCAD models in
+`freecad/`). They were reworked after field testing: stronger, more realistic and with room for
 extensions. Implements (mower bar, dock-weed drill, liquid manure injector) are in the
 [implements repo](https://github.com/JacobsFarm/Bruut_OpenAgbot_Implements).
 
@@ -211,7 +211,7 @@ extensions. Implements (mower bar, dock-weed drill, liquid manure injector) are 
 | `Arduino/` | Firmware for the dual stepper steering controller |
 | `VESC/` | VESC configuration, CAN notes and wiring |
 | `Single_script_code/` | Stand-alone tools: AB mission maker, RTK point logger, ride report, TensorRT conversion |
-| `CAD_designs/` | OpenSCAD and FreeCAD models of the robot |
+| [openagbot-CADdesigns](https://github.com/JacobsFarm/openagbot-CADdesigns) | OpenSCAD and FreeCAD models of the robot (separate repo) |
 | `setup/` | Jetson, CAN and camera setup notes, hardware specs |
 | `docs/` | Design notes (field missions and geofence) and README images |
 | `weights/` | Place for detection model weights (see `NOTES.txt`) |
